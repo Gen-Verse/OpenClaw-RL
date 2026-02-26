@@ -1,0 +1,23 @@
+# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+from dataclasses import dataclass
+
+import torch.distributed as dist
+from torch import Tensor
+
+
+@dataclass
+class PackedSeqParams:
+    '''
+    parameters to TEDotProductAttention and fused rope kernels for the
+    `thd` (packed) sequence format
+    '''
+
+    qkv_format: str = None
+    cu_seqlens_q: Tensor = None
+    cu_seqlens_kv: Tensor = None
+    cu_seqlens_q_padded: Tensor = None
+    cu_seqlens_kv_padded: Tensor = None
+    max_seqlen_q: int = None
+    max_seqlen_kv: int = None
+    local_cp_size: int = None
+    cp_group: dist.ProcessGroup = None
