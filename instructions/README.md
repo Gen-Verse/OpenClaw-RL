@@ -44,7 +44,7 @@ apt-get install -y python3-apt
 | `rollout-max-context-len` | `32768` | max context length in a session |
 | `rollout-temperature` | `0.6` | temperature |
 | `advantage-estimator` | (see script) | `on_policy_distillation` / `grpo` |
-| `kl-loss-coef` | `0.01` | kl loss weight |
+| `kl-loss-coef` | `0.02` | kl loss weight |
 
 
 
