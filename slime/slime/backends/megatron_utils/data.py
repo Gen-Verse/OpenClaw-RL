@@ -528,6 +528,7 @@ def log_rollout_data(
                 "step_wise_step_token_spans",
                 "step_wise_step_indices",
                 "group_indices",
+                "teacher_topk_indices",
             ]:
                 continue
             # Upload per sample mean for each rollout value
@@ -537,6 +538,9 @@ def log_rollout_data(
                 if len(val) == 0:
                     continue
                 if isinstance(val[0], torch.Tensor):
+                    # Skip 2D teacher_log_probs (top-K); metrics come from loss fn
+                    if key == "teacher_log_probs" and val[0].dim() == 2:
+                        continue
                     # NOTE: Here we have to do the clone().detach(), otherwise the tensor will be
                     # modified in place and will cause problem for the next rollout.
                     if key in [

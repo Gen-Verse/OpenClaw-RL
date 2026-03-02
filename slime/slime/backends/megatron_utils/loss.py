@@ -16,6 +16,7 @@ from slime.utils.ppo_utils import (
     calculate_log_probs_and_entropy,
     compute_approx_kl,
     compute_gspo_kl,
+    compute_log_probs,
     compute_opsm_mask,
     compute_policy_loss,
     get_advantages_and_returns_batch,
@@ -439,6 +440,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
         teacher_log_probs = [
             t_log_prob[-response_length:]
             for t_log_prob, response_length in zip(teacher_log_probs, response_lengths, strict=False)
+        ]
+        # Handle 2D [T, K] teacher_log_probs from top-K: use top-1 (index 0)
+        teacher_log_probs = [
+            t_log_prob[..., 0] if t_log_prob.dim() == 2 else t_log_prob
+            for t_log_prob in teacher_log_probs
         ]
         advantages = [
             teacher_log_prob - student_log_prob
@@ -901,6 +907,127 @@ def sft_loss_function(
     )
 
 
+def topk_distillation_loss_function(
+    args: Namespace,
+    batch: RolloutBatch,
+    logits: torch.Tensor,
+    sum_of_sample_mean: Callable[[torch.Tensor], torch.Tensor],
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Compute top-K logits-based distillation loss with tail trick.
+
+    Computes reverse KL divergence D_KL(student || teacher) over the teacher's
+    top-K vocabulary tokens plus a "tail" bin capturing remaining probability
+    mass, following the SDFT/SDPO approach.
+
+    Args:
+        args: Configuration containing `distill_topk` and `entropy_coef`.
+        batch: Mini-batch with "teacher_log_probs" ([T, K]), "teacher_topk_indices"
+            ([T, K]), "unconcat_tokens", "response_lengths", "total_lengths",
+            and "loss_masks".
+        logits: Policy logits with shape `[1, T, V]`.
+        sum_of_sample_mean: Reduction function that averages per-sample values.
+
+    Returns:
+        Tuple of `(loss, metrics)` where `loss` is a scalar tensor and `metrics`
+        contains detached scalars for logging.
+    """
+    teacher_topk_logprobs = batch["teacher_log_probs"]  # list of [R, K] tensors
+    teacher_topk_indices = batch["teacher_topk_indices"]  # list of [R, K] long tensors
+    response_lengths = batch["response_lengths"]
+    total_lengths = batch["total_lengths"]
+    max_seq_lens = batch.get("max_seq_lens", None)
+    tp_group = mpu.get_tensor_model_parallel_group()
+
+    K = args.distill_topk
+
+    # Collect student log-probs at teacher's top-K indices per sample
+    all_student_topk_logps = []
+    all_teacher_topk_logps = []
+    for i, (logits_chunk, tokens_chunk) in enumerate(get_responses(
+        logits,
+        args=args,
+        unconcat_tokens=batch["unconcat_tokens"],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        max_seq_lens=max_seq_lens,
+    )):
+        R = logits_chunk.size(0)
+        t_logps = teacher_topk_logprobs[i]  # [R, K]
+        t_indices = teacher_topk_indices[i]  # [R, K]
+
+        # Ensure on same device
+        if not t_logps.is_cuda:
+            t_logps = t_logps.to(device=logits_chunk.device)
+        if not t_indices.is_cuda:
+            t_indices = t_indices.to(device=logits_chunk.device)
+
+        # Compute student log-probs at each of the K teacher indices
+        # compute_log_probs expects [seq_len, vocab] logits and [seq_len] tokens
+        student_logps_k = []
+        need_clone = torch.is_grad_enabled()
+        for k in range(K):
+            logit_input = logits_chunk.clone() if need_clone else logits_chunk
+            lp_k = compute_log_probs(logit_input, t_indices[:, k], tp_group)  # [R, 1]
+            student_logps_k.append(lp_k.squeeze(-1))  # [R]
+        student_topk_logps = torch.stack(student_logps_k, dim=-1)  # [R, K]
+
+        all_student_topk_logps.append(student_topk_logps)
+        all_teacher_topk_logps.append(t_logps)
+
+    # Concatenate across samples in the micro-batch
+    student_topk = torch.cat(all_student_topk_logps, dim=0)  # [total_R, K]
+    teacher_topk = torch.cat(all_teacher_topk_logps, dim=0)  # [total_R, K]
+
+    # Tail trick: compute tail probability mass for both distributions
+    # log(1 - exp(logsumexp(topk_logps))) = log(-expm1(logsumexp(topk_logps)))
+    student_log_s = torch.logsumexp(student_topk, dim=-1, keepdim=True)
+    student_log_s = torch.clamp(student_log_s, max=-1e-7)
+    student_tail = torch.log(-torch.expm1(student_log_s))  # [total_R, 1]
+
+    teacher_log_s = torch.logsumexp(teacher_topk, dim=-1, keepdim=True)
+    teacher_log_s = torch.clamp(teacher_log_s, max=-1e-7)
+    teacher_tail = torch.log(-torch.expm1(teacher_log_s))  # [total_R, 1]
+
+    # Append tail bin: [total_R, K+1]
+    student_with_tail = torch.cat([student_topk, student_tail], dim=-1)
+    teacher_with_tail = torch.cat([teacher_topk, teacher_tail], dim=-1)
+
+    # Reverse KL: D_KL(student || teacher) = sum_k student_k * (log student_k - log teacher_k)
+    # F.kl_div(input=log_target, target=log_input, log_target=True) computes
+    # D_KL(target || input) = sum_k exp(log_target_k) * (log_target_k - log_input_k)
+    # We want D_KL(student || teacher), so: input=teacher, target=student
+    per_token_kl = torch.nn.functional.kl_div(
+        teacher_with_tail,
+        student_with_tail,
+        reduction="none",
+        log_target=True,
+    ).sum(dim=-1)  # [total_R]
+
+    kl_loss = sum_of_sample_mean(per_token_kl)
+
+    # Optional entropy bonus
+    loss = kl_loss
+    entropy_loss = torch.tensor(0.0, device=logits.device)
+    if args.entropy_coef != 0.0:
+        # Use student top-K log-probs to estimate entropy contribution
+        student_probs = torch.exp(student_with_tail)
+        entropy = -(student_probs * student_with_tail).sum(dim=-1)  # [total_R]
+        entropy_loss = sum_of_sample_mean(entropy)
+        loss = loss - args.entropy_coef * entropy_loss
+
+    # Ensure gradient flow even when empty
+    if per_token_kl.numel() == 0:
+        loss = loss + 0 * logits.sum()
+
+    reported_loss = {
+        "loss": loss.clone().detach(),
+        "kl_loss": kl_loss.clone().detach(),
+        "entropy_loss": entropy_loss.clone().detach(),
+    }
+
+    return loss, reported_loss
+
+
 def loss_function(
     args: Namespace,
     batch: RolloutBatch,
@@ -948,6 +1075,8 @@ def loss_function(
             func = value_loss_function
         case "sft_loss":
             func = sft_loss_function
+        case "topk_distillation_loss":
+            func = topk_distillation_loss_function
         case "custom_loss":
             func = load_function(args.custom_loss_function_path)
         case _:

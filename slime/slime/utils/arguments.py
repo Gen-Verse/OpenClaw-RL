@@ -821,7 +821,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--loss-type",
                 type=str,
-                choices=["policy_loss", "sft_loss", "custom_loss"],
+                choices=["policy_loss", "sft_loss", "custom_loss", "topk_distillation_loss"],
                 default="policy_loss",
                 help=(
                     "Choose loss type, currently support ppo policy_loss or sft_loss, "
@@ -867,6 +867,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                     "If set, we will not compute the advantages and returns, "
                     "This is useful for sft or custom loss function."
                 ),
+            )
+            parser.add_argument(
+                "--distill-topk",
+                type=int,
+                default=50,
+                help="Number of top-K teacher logprobs for logits-based distillation loss",
             )
             parser.add_argument(
                 "--use-kl-loss", action="store_true", default=False, help="whether to use KL loss from GRPO"

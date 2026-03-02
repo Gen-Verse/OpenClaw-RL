@@ -194,6 +194,7 @@ class OpenClawOPDAPIServer:
         self._prm_max_tokens = int(getattr(args, "prm_max_new_tokens", 4096))
         self._teacher_lp_max_concurrency = int(os.getenv("OPENCLAW_OPD_TEACHER_LP_MAX_CONCURRENCY", "3"))
         self._teacher_lp_semaphore = asyncio.Semaphore(max(1, self._teacher_lp_max_concurrency))
+        self.distill_topk = int(getattr(args, "distill_topk", 50))
         prm_ip = getattr(args, "prm_router_ip", None)
         prm_port = getattr(args, "prm_router_port", None)
         self._prm_url = f"http://{prm_ip}:{prm_port}/generate" if prm_ip and prm_port else ""
@@ -343,10 +344,16 @@ class OpenClawOPDAPIServer:
             logger.warning("[OpenClaw-OPD] judge query failed (vote %d): %s", vote_id, e)
             return {"vote_id": vote_id, "score": None, "hint": "", "raw": ""}
 
-    async def _compute_teacher_log_probs(self, input_ids: list[int], response_len: int) -> list[float]:
-        # Only request logprobs for the response suffix to reduce peak memory.
-        # This mirrors OPD need (token-level target on response tokens) and avoids
-        # full-sequence logprob materialization on long contexts.
+    async def _compute_teacher_topk_logprobs(
+        self, input_ids: list[int], response_len: int
+    ) -> tuple[list[list[float]], list[list[int]]]:
+        """Compute teacher's top-K log-probs and token indices for response tokens.
+
+        Returns:
+            (logprobs, indices) where each is a list of length response_len,
+            with each element being a list of length K.
+        """
+        K = self.distill_topk
         start_len = max(0, len(input_ids) - response_len)
         payload = {
             "input_ids": input_ids,
@@ -357,6 +364,7 @@ class OpenClawOPDAPIServer:
             },
             "return_logprob": True,
             "logprob_start_len": start_len,
+            "top_logprobs_num": K,
         }
         async with self._teacher_lp_semaphore:
             async with httpx.AsyncClient(timeout=None) as client:
@@ -365,25 +373,55 @@ class OpenClawOPDAPIServer:
                 result = resp.json()
 
         meta = result.get("meta_info", {}) if isinstance(result, dict) else {}
-        inp = meta.get("input_token_logprobs")
-        if not isinstance(inp, list):
-            return [0.0] * response_len
+        inp_top = meta.get("input_top_logprobs")
 
-        all_lp = []
-        for item in inp:
-            if isinstance(item, (list, tuple)) and len(item) >= 1:
-                val = item[0]
-                all_lp.append(float(val) if val is not None else 0.0)
-            elif isinstance(item, dict) and "logprob" in item:
-                val = item["logprob"]
-                all_lp.append(float(val) if val is not None else 0.0)
+        # Fallback: zero logprobs
+        zero_row_lp = [0.0] * K
+        zero_row_idx = list(range(K))
+        if not isinstance(inp_top, list):
+            return [[0.0] * K] * response_len, [list(range(K))] * response_len
+
+        # Parse top-K logprobs from SGLang's format.
+        # Each position returns a list of K tuples: (logprob, token_id, token_text)
+        all_logprobs: list[list[float]] = []
+        all_indices: list[list[int]] = []
+        for pos_data in inp_top:
+            if isinstance(pos_data, (list, tuple)):
+                row_lp = []
+                row_idx = []
+                for entry in pos_data:
+                    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        row_lp.append(float(entry[0]) if entry[0] is not None else 0.0)
+                        row_idx.append(int(entry[1]))
+                    elif isinstance(entry, dict):
+                        row_lp.append(float(entry.get("logprob", 0.0)))
+                        row_idx.append(int(entry.get("token_id", 0)))
+                    else:
+                        row_lp.append(0.0)
+                        row_idx.append(0)
+                # Pad or truncate to K
+                while len(row_lp) < K:
+                    row_lp.append(0.0)
+                    row_idx.append(0)
+                all_logprobs.append(row_lp[:K])
+                all_indices.append(row_idx[:K])
             else:
-                all_lp.append(0.0)
-        if len(all_lp) > 1:
-            all_lp = all_lp[1:]
-        if len(all_lp) >= response_len:
-            return all_lp[-response_len:]
-        return [0.0] * (response_len - len(all_lp)) + all_lp
+                all_logprobs.append(list(zero_row_lp))
+                all_indices.append(list(zero_row_idx))
+
+        # Skip position 0 (corresponds to the BOS/first token with no context)
+        if len(all_logprobs) > 1:
+            all_logprobs = all_logprobs[1:]
+            all_indices = all_indices[1:]
+
+        # Align to response_len
+        if len(all_logprobs) >= response_len:
+            return all_logprobs[-response_len:], all_indices[-response_len:]
+        pad_len = response_len - len(all_logprobs)
+        return (
+            [[0.0] * K] * pad_len + all_logprobs,
+            [list(range(K))] * pad_len + all_indices,
+        )
 
     async def _opd_evaluate(self, session_id: str, turn_num: int, turn_data: dict[str, Any], next_state: dict[str, Any]) -> dict[str, Any]:
         next_state_text = _flatten_message_content(next_state.get("content")) if next_state else ""
@@ -429,7 +467,9 @@ class OpenClawOPDAPIServer:
 
         enhanced_full_text = enhanced_prompt_text + turn_data["response_text"]
         enhanced_ids = self.tokenizer(enhanced_full_text, add_special_tokens=False)["input_ids"]
-        teacher_log_probs = await self._compute_teacher_log_probs(enhanced_ids, len(turn_data["response_ids"]))
+        teacher_log_probs, teacher_topk_indices = await self._compute_teacher_topk_logprobs(
+            enhanced_ids, len(turn_data["response_ids"])
+        )
 
         logger.info(
             "%s[OpenClaw-OPD] session=%s turn=%d accepted hint_len=%d votes=%s%s",
@@ -451,7 +491,13 @@ class OpenClawOPDAPIServer:
                 "teacher_logprob_len": len(teacher_log_probs),
             }
         )
-        return {"accepted": True, "teacher_log_probs": teacher_log_probs, "hint": hint, "votes": votes}
+        return {
+            "accepted": True,
+            "teacher_log_probs": teacher_log_probs,
+            "teacher_topk_indices": teacher_topk_indices,
+            "hint": hint,
+            "votes": votes,
+        }
 
     def _fire_opd_task(self, session_id: str, turn_num: int, turn_data: dict[str, Any], next_state: dict[str, Any]):
         if not self._prm_enabled or not next_state:
@@ -618,11 +664,17 @@ class OpenClawOPDAPIServer:
     async def _submit_turn_sample(self, turn_data: dict[str, Any], session_id: str, opd_result: dict[str, Any]):
         prompt_ids = turn_data["prompt_ids"]
         response_ids = turn_data["response_ids"]
+        K = self.distill_topk
         teacher_log_probs = opd_result.get("teacher_log_probs") or []
+        teacher_topk_indices = opd_result.get("teacher_topk_indices") or []
+        # teacher_log_probs and teacher_topk_indices are lists of lists: [[K floats], ...]
         if len(teacher_log_probs) > len(response_ids):
             teacher_log_probs = teacher_log_probs[: len(response_ids)]
+            teacher_topk_indices = teacher_topk_indices[: len(response_ids)]
         elif len(teacher_log_probs) < len(response_ids):
-            teacher_log_probs = teacher_log_probs + [0.0] * (len(response_ids) - len(teacher_log_probs))
+            pad_len = len(response_ids) - len(teacher_log_probs)
+            teacher_log_probs = [[0.0] * K] * pad_len + teacher_log_probs
+            teacher_topk_indices = [list(range(K))] * pad_len + teacher_topk_indices
 
         sample = Sample()
         sample.prompt = turn_data["prompt_text"]
@@ -631,7 +683,8 @@ class OpenClawOPDAPIServer:
         sample.response_length = len(response_ids)
         sample.loss_mask = [1] * len(response_ids)
         sample.rollout_log_probs = turn_data["response_logprobs"]
-        sample.teacher_log_probs = torch.tensor(teacher_log_probs, dtype=torch.float32)
+        sample.teacher_log_probs = torch.tensor(teacher_log_probs, dtype=torch.float32)  # [T, K]
+        sample.teacher_topk_indices = torch.tensor(teacher_topk_indices, dtype=torch.long)  # [T, K]
         sample.status = Sample.Status.COMPLETED
         sample.index = next(self._index_counter)
         sample.group_index = next(self._group_counter)
