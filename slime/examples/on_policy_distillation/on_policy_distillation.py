@@ -37,10 +37,31 @@ def post_process_rewards(args, samples: list[Sample], **kwargs):
     rewards = [sample.get_reward_value(args) for sample in samples]
     response_lengths = [sample.response_length for sample in samples]
 
+    meta_key = "input_top_logprobs"
+    use_topk = meta_key in rewards[0].get("meta_info", {})
+
+    if not use_topk:
+        # Fallback: legacy 1D path (no top-K available from server)
+        teacher_log_probs = [
+            torch.tensor(
+                [item[0] for item in reward["meta_info"]["input_token_logprobs"][1:]],
+                dtype=torch.float32,
+            )
+            for reward in rewards
+        ]
+        teacher_log_probs = [
+            t_log_prob[-response_length:]
+            for t_log_prob, response_length in zip(teacher_log_probs, response_lengths, strict=False)
+        ]
+        for sample, t_log_probs in zip(samples, teacher_log_probs, strict=False):
+            sample.teacher_log_probs = t_log_probs
+        return teacher_log_probs, teacher_log_probs
+
+    # Top-K path: parse [T, K] logprobs and indices
     teacher_log_probs_2d = []
     teacher_topk_indices_2d = []
     for reward in rewards:
-        input_top_logprobs = reward["meta_info"]["input_top_logprobs"]
+        input_top_logprobs = reward["meta_info"][meta_key]
         # Each position returns a list of K tuples: (logprob, token_id, token_text)
         # Skip position 0 (BOS with no context)
         pos_list = input_top_logprobs[1:] if len(input_top_logprobs) > 1 else input_top_logprobs

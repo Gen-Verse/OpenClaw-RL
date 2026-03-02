@@ -441,6 +441,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             t_log_prob[-response_length:]
             for t_log_prob, response_length in zip(teacher_log_probs, response_lengths, strict=False)
         ]
+        # Handle 2D [T, K] teacher_log_probs from top-K: use top-1 (index 0)
+        teacher_log_probs = [
+            t_log_prob[..., 0] if t_log_prob.dim() == 2 else t_log_prob
+            for t_log_prob in teacher_log_probs
+        ]
         advantages = [
             teacher_log_prob - student_log_prob
             for teacher_log_prob, student_log_prob in zip(teacher_log_probs, student_log_probs, strict=False)
