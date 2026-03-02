@@ -528,6 +528,8 @@ def log_rollout_data(
                 "step_wise_step_token_spans",
                 "step_wise_step_indices",
                 "group_indices",
+                "teacher_log_probs",
+                "teacher_topk_indices",
             ]:
                 continue
             # Upload per sample mean for each rollout value
@@ -546,7 +548,6 @@ def log_rollout_data(
                         "returns",
                         "advantages",
                         "values",
-                        "teacher_log_probs",
                     ]:
                         val = torch.cat(val).clone().detach()
                         sum_of_sample_mean = get_sum_of_sample_mean(
