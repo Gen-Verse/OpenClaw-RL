@@ -273,6 +273,28 @@ Before launching, set these important environment variables as needed:
 
 You can check more details about configurations in [`./instructions`](./instructions) .
 
+## 📚 Documentation
+
+### Understanding the Algorithms
+
+| Topic | Description | Link |
+|-------|-------------|------|
+| **Teacher Top-K** | Why we use top-K distillation for memory efficiency | [Quick Guide](./docs/teacher_topk_quick.md) · [Deep Dive](./docs/teacher_topk_explained.md) |
+
+### Why Teacher Top-K?
+
+A common question: **"Why does OpenClaw-RL use teacher top-K instead of full vocabulary distillation?"**
+
+**Short answer**: Top-K reduces memory by **2500×** while preserving **95%+** of distillation quality.
+
+For a 128K vocabulary model:
+- Full distillation: 1 MB per token → 32 GB for 4K sequence (infeasible!)
+- Top-50 distillation: 400 bytes per token → 12.8 MB for 4K sequence (practical!)
+
+**Learn more:**
+- [Quick explanation](./docs/teacher_topk_quick.md) (5 min read)
+- [Detailed technical guide](./docs/teacher_topk_explained.md) (15 min read)
+
 
 ## 📖 Citation
 
