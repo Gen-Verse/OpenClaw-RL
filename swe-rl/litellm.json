@@ -1,0 +1,20 @@
+{
+    "openai/Qwen/Qwen3-4B": {
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "mode": "chat",
+        "max_tokens": 32768
+    },
+    "openai/Qwen/Qwen3-8B": {
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "mode": "chat",
+        "max_tokens": 32768
+    },
+    "openai/Qwen/Qwen3-Coder-30B-A3B-Instruct": {
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "mode": "chat",
+        "max_tokens": 64000
+    }
+}

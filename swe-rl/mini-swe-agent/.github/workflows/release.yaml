@@ -1,0 +1,106 @@
+name: Release to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_pypi:
+        description: 'Upload to Test PyPI instead of PyPI'
+        required: false
+        default: false
+        type: boolean
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    - name: Install build dependencies
+      run: |
+        uv pip install --python ${Python_ROOT_DIR} build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check package
+      run: python -m twine check dist/*
+
+    - name: Upload to Test PyPI
+      if: ${{ github.event.inputs.test_pypi == 'true' }}
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository-url: https://test.pypi.org/legacy/
+        verbose: true
+
+    - name: Upload to PyPI
+      if: ${{ github.event.inputs.test_pypi != 'true' }}
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        verbose: true
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: build-and-publish
+
+    steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - name: Install uv and pipx
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        uv pip install --python ${Python_ROOT_DIR} pipx
+
+    - name: Wait for package availability
+      run: |
+        echo "Waiting for package to be available on PyPI..."
+        sleep 60
+
+    - name: Test pipx run mini-swe-agent --help (Test PyPI)
+      if: ${{ github.event.inputs.test_pypi == 'true' }}
+      run: pipx run --pip-args="--index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/" mini-swe-agent --help
+
+    - name: Test pipx run mini-swe-agent --help (PyPI)
+      if: ${{ github.event.inputs.test_pypi != 'true' }}
+      run: pipx run mini-swe-agent --help
+
+    - name: Test uvx mini-swe-agent --help (Test PyPI)
+      if: ${{ github.event.inputs.test_pypi == 'true' }}
+      run: uvx --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ mini-swe-agent --help
+
+    - name: Test uvx mini-swe-agent --help (PyPI)
+      if: ${{ github.event.inputs.test_pypi != 'true' }}
+      run: uvx mini-swe-agent --help
+
+    - name: Test pip install and CLI commands (Test PyPI)
+      if: ${{ github.event.inputs.test_pypi == 'true' }}
+      run: |
+        uv pip install --python ${Python_ROOT_DIR} --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ mini-swe-agent
+        mini --help
+        mini-extra --help
+        mini-e --help
+
+    - name: Test pip install and CLI commands (PyPI)
+      if: ${{ github.event.inputs.test_pypi != 'true' }}
+      run: |
+        uv pip install --python ${Python_ROOT_DIR} mini-swe-agent
+        mini --help
+        mini-extra --help
+        mini-e --help

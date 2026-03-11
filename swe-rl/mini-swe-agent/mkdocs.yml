@@ -1,0 +1,154 @@
+site_name: mini-SWE-agent documentation
+site_url: https://mini-swe-agent.com
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+    annotation: material/chevron-right-circle
+  custom_dir: docs/overrides
+  logo: assets/mini_square.svg
+  favicon: assets/mini_square.svg
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - scheme: default
+      # primary: black  # override in custom.css
+      accent: deep orange
+      media: "(prefers-color-scheme: light)"
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      # primary: black  # override in custom.css
+      accent: deep orange
+      media: "(prefers-color-scheme: dark)"
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.indexes
+    - navigation.top
+    - content.action.edit
+    - navigation.footer
+    - content.code.copy
+    - content.footnote.tooltips
+    - header.autohide
+    - announce.dismiss
+    - content.code.annotate
+    - navigation.tabs
+    - navigation.tabs.sticky
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences
+  - pymdownx.magiclink
+  - footnotes
+  - attr_list
+  - md_in_html
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+nav:
+  - Getting Started:
+    - "Overview": index.md
+    - "Quick start": quickstart.md
+    - "Usage":
+      - "<code>mini</code>": usage/mini.md
+      - "<code>mini -v</code>": usage/mini_v.md
+      - "SWE-bench": usage/swebench.md
+      - "Inspector": usage/inspector.md
+    - "Models":
+      - "Quick start": models/quickstart.md
+      - "Local models": models/local_models.md
+      - "Troubleshooting": models/troubleshooting.md
+    - "Guides":
+      - "Global configuration": advanced/global_configuration.md
+      - "Yaml config files": advanced/yaml_configuration.md
+      - "Environments": advanced/environments.md
+      - "Control flow": advanced/control_flow.md
+      - "Python bindings": advanced/cookbook.md
+    - "FAQ": faq.md
+    - "Contributing": contributing.md
+  - API Reference:
+    - "reference/index.md"
+    - Agents:
+      - "DefaultAgent": "reference/agents/default.md"
+      - "InteractiveAgent": "reference/agents/interactive.md"
+      - "TextualAgent": "reference/agents/textual.md"
+    - Models:
+      - "LitellmModel": "reference/models/litellm.md"
+      - "AnthropicModel": "reference/models/anthropic.md"
+      - "OpenRouterModel": "reference/models/openrouter.md"
+      - "DeterministicModel": "reference/models/test_models.md"
+      - "Extra Models": "reference/models/extra.md"
+      - "Model Utilities": "reference/models/utils.md"
+    - Environments:
+      - "LocalEnvironment": "reference/environments/local.md"
+      - "DockerEnvironment": "reference/environments/docker.md"
+      - "SingularityEnvironment": "reference/environments/singularity.md"
+      - "SwerexDockerEnvironment": "reference/environments/swerex_docker.md"
+      - "BubblewrapEnvironment": "reference/environments/bubblewrap.md"
+    - Run Scripts:
+      - "Hello World": "reference/run/hello_world.md"
+      - "mini": "reference/run/mini.md"
+      - "GitHub Issue": "reference/run/github_issue.md"
+      - "SWE-bench (batch)": "reference/run/swebench.md"
+      - "SWE-bench (single)": "reference/run/swebench_single.md"
+  - Blog: https://www.swebench.com/SWE-bench/blog/category/mini-swe-agent/
+  - Leaderboard: https://swebench.com
+plugins:
+  - glightbox
+  - search
+  - include-markdown
+  - mike:
+      canonical_version: latest
+      version_selector: true
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            merge_init_into_class: true
+            summary: false
+            show_root_heading: true
+            heading_level: 2
+            docstring_style: google
+            show_if_no_docstring: true
+            show_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            separate_signature: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            filters:
+              - "!^_"
+              - "!^model_config"
+              - "!^model_post_init"
+repo_url: https://github.com/SWE-agent/mini-SWE-agent
+repo_name: SWE-agent/mini-SWE-agent
+edit_uri: edit/main/docs/
+extra_javascript:
+  - assets/js/sh-annotation.js
+  - assets/js/gif-controls.js
+extra_css:
+  - assets/custom.css
+  - assets/gif-controls.css
+  - assets/mkdocstrings.css
+  - assets/image_theme.css
+  - assets/bubbles.css
+  - assets/navigation_cards.css
+  - https://fonts.googleapis.com/icon?family=Material+Icons
+extra:
+  version:
+    provider: mike
+  analytics:
+    provider: google
+    property: G-SG2NC1GDRD
