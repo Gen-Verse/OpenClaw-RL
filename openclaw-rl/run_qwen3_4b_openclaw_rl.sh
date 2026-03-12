@@ -15,21 +15,30 @@ set -ex
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
 
-NUM_GPUS=${NUM_GPUS:-8}
-ACTOR_GPUS=${ACTOR_GPUS:-4}
-ROLLOUT_GPUS=${ROLLOUT_GPUS:-2}
-PRM_GPUS=${PRM_GPUS:-2}
-PRM_PROVIDER=${PRM_PROVIDER:-local} # local | api
+NUM_GPUS=${NUM_GPUS:-1}
+ACTOR_GPUS=${ACTOR_GPUS:-1}
+ROLLOUT_GPUS=${ROLLOUT_GPUS:-1}
+PRM_GPUS=${PRM_GPUS:-0}
+PRM_PROVIDER=${PRM_PROVIDER:-api} # local | api
+COLOCATE=${COLOCATE:-1} # 1=actor/rollout share the same GPU set
 
 EFFECTIVE_PRM_GPUS="${PRM_GPUS}"
 if [ "${PRM_PROVIDER}" = "api" ]; then
     EFFECTIVE_PRM_GPUS=0
 fi
 
-if (( ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS > NUM_GPUS )); then
-    echo "ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS must be <= NUM_GPUS"
-    echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, EFFECTIVE_PRM_GPUS=${EFFECTIVE_PRM_GPUS}, NUM_GPUS=${NUM_GPUS}"
-    exit 1
+if [ "${COLOCATE}" = "1" ]; then
+    if (( ACTOR_GPUS > NUM_GPUS )); then
+        echo "When COLOCATE=1, ACTOR_GPUS must be <= NUM_GPUS"
+        echo "ACTOR_GPUS=${ACTOR_GPUS}, NUM_GPUS=${NUM_GPUS}"
+        exit 1
+    fi
+else
+    if (( ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS > NUM_GPUS )); then
+        echo "ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS must be <= NUM_GPUS"
+        echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, EFFECTIVE_PRM_GPUS=${EFFECTIVE_PRM_GPUS}, NUM_GPUS=${NUM_GPUS}"
+        exit 1
+    fi
 fi
 
 export RAY_health_check_failure_threshold=20
@@ -71,7 +80,7 @@ export HOST="0.0.0.0"
 export PORT="30000"
 export OPENCLAW_RECORD_ENABLED="${OPENCLAW_RECORD_ENABLED:-1}"  # 0=off, 1=on
 export OPENCLAW_RECORD_FILE="${SCRIPT_DIR}/results/qwen3_4b_record.jsonl"
-export TP="2"
+export TP="1"
 export CONTEXT_LENGTH="32768"
 export MEM_FRACTION_STATIC="0.85"
 export REASONING_PARSER="qwen3"
@@ -104,7 +113,7 @@ ROLLOUT_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 4
+   --tensor-model-parallel-size 1
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
@@ -148,7 +157,7 @@ OPTIMIZER_ARGS=(
 EVAL_ARGS=()
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
+   --rollout-num-gpus-per-engine 1
    --sglang-tool-call-parser "${TOOL_CALL_PARSER}"
    --sglang-mem-fraction-static 0.85
    --sglang-context-length 32768
@@ -192,6 +201,10 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
+if [ "${COLOCATE}" = "1" ]; then
+  MISC_ARGS+=(--colocate --offload)
+fi
+
 USE_WANDB=${USE_WANDB:-1}
 WANDB_PROJECT=${WANDB_PROJECT:-openclaw_rl}
 WANDB_KEY_VALUE=${WANDB_KEY:-${WANDB_API_KEY:-}}
@@ -219,7 +232,7 @@ RUNTIME_ENV_JSON="{
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
-   -- python3 train_async.py \
+   -- python3 train.py \
    --actor-num-nodes 1 \
    --actor-num-gpus-per-node "${ACTOR_GPUS}" \
    --rollout-num-gpus "${ROLLOUT_GPUS}" \
