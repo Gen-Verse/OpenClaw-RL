@@ -32,6 +32,7 @@ export RAY_num_heartbeats_timeout=60
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 SLIME_ROOT="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
+MEGATRON_ROOT="$(cd -- "${SCRIPT_DIR}/../Megatron-LM" &>/dev/null && pwd)"
 source "${SLIME_ROOT}/scripts/models/qwen3-4B.sh"
 cd "${SLIME_ROOT}"
 echo "Current Working Directory: $(pwd)"
@@ -171,7 +172,7 @@ ray start --head --node-ip-address "${MASTER_ADDR}" --num-gpus "${NUM_GPUS}" --d
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/absolute/path/to/OpenClaw-RL/Megatron-LM/:${SCRIPT_DIR}:${SLIME_ROOT}\",
+    \"PYTHONPATH\": \"${MEGATRON_ROOT}:${SCRIPT_DIR}:${SLIME_ROOT}\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"OPENCLAW_EVAL_MODE\": \"${OPENCLAW_EVAL_MODE}\"
   }
