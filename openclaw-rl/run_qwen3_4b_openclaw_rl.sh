@@ -19,10 +19,16 @@ NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
 ROLLOUT_GPUS=${ROLLOUT_GPUS:-2}
 PRM_GPUS=${PRM_GPUS:-2}
+PRM_PROVIDER=${PRM_PROVIDER:-local} # local | api
 
-if (( ACTOR_GPUS + ROLLOUT_GPUS + PRM_GPUS > NUM_GPUS )); then
-    echo "ACTOR_GPUS + ROLLOUT_GPUS + PRM_GPUS must be <= NUM_GPUS"
-    echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, PRM_GPUS=${PRM_GPUS}, NUM_GPUS=${NUM_GPUS}"
+EFFECTIVE_PRM_GPUS="${PRM_GPUS}"
+if [ "${PRM_PROVIDER}" = "api" ]; then
+    EFFECTIVE_PRM_GPUS=0
+fi
+
+if (( ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS > NUM_GPUS )); then
+    echo "ACTOR_GPUS + ROLLOUT_GPUS + EFFECTIVE_PRM_GPUS must be <= NUM_GPUS"
+    echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, EFFECTIVE_PRM_GPUS=${EFFECTIVE_PRM_GPUS}, NUM_GPUS=${NUM_GPUS}"
     exit 1
 fi
 
@@ -33,6 +39,25 @@ export RAY_num_heartbeats_timeout=60
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 SLIME_ROOT="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
+
+# Auto-load env vars for local runs (e.g. PRM_API_BASE_URL/PRM_API_MODEL/PRM_API_KEY).
+# Priority: ENV_FILE (if set) > ${SCRIPT_DIR}/.env > ${SCRIPT_DIR}/../.env
+ENV_FILE_PATH="${ENV_FILE:-}"
+if [ -z "${ENV_FILE_PATH}" ]; then
+  if [ -f "${SCRIPT_DIR}/.env" ]; then
+    ENV_FILE_PATH="${SCRIPT_DIR}/.env"
+  elif [ -f "${SCRIPT_DIR}/../.env" ]; then
+    ENV_FILE_PATH="${SCRIPT_DIR}/../.env"
+  fi
+fi
+if [ -n "${ENV_FILE_PATH}" ] && [ -f "${ENV_FILE_PATH}" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE_PATH}"
+  set +a
+  echo "Loaded env file: ${ENV_FILE_PATH}"
+fi
+
 source "${SLIME_ROOT}/scripts/models/qwen3-4B.sh"
 
 HF_CKPT=${HF_CKPT:-/absolute/path/to/Qwen3-4B-Thinking-2507}
@@ -132,13 +157,27 @@ SGLANG_ARGS=(
 
 PRM_ARGS=(
    --prm-enable
-   --prm-num-gpus "${PRM_GPUS}"
+   --prm-provider "${PRM_PROVIDER}"
+   --prm-num-gpus "${EFFECTIVE_PRM_GPUS}"
    --prm-num-gpus-per-engine 2
-   --prm-model-path "${PRM_MODEL_PATH}"
    --prm-m "${PRM_M}"
    --prm-temperature "${PRM_TEMPERATURE:-0.6}"
    --prm-max-new-tokens "${PRM_MAX_NEW_TOKENS:-4096}"
 )
+
+if [ "${PRM_PROVIDER}" = "api" ]; then
+  # OpenAI-compatible endpoint, e.g. https://api.openai.com/v1
+  PRM_ARGS+=(
+    --prm-api-base-url "${PRM_API_BASE_URL}"
+    --prm-api-model "${PRM_API_MODEL}"
+  )
+  if [ -n "${PRM_API_KEY:-}" ]; then
+    PRM_ARGS+=(--prm-api-key "${PRM_API_KEY}")
+  fi
+  PRM_ARGS+=(--prm-api-timeout "${PRM_API_TIMEOUT:-120}")
+else
+  PRM_ARGS+=(--prm-model-path "${PRM_MODEL_PATH}")
+fi
 
 CUSTOM_ARGS=(
    --custom-generate-function-path openclaw_api_server.generate

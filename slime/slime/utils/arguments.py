@@ -1292,6 +1292,13 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Enable framework-hosted PRM servers and step-wise PRM scoring.",
             )
             parser.add_argument(
+                "--prm-provider",
+                type=str,
+                default="local",
+                choices=["local", "api"],
+                help="PRM backend provider: local SGLang engines or external API.",
+            )
+            parser.add_argument(
                 "--prm-num-gpus",
                 type=int,
                 default=0,
@@ -1344,6 +1351,30 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=2048,
                 help="Max new tokens for each PRM judge generation call.",
+            )
+            parser.add_argument(
+                "--prm-api-base-url",
+                type=str,
+                default=None,
+                help="Base URL for API-mode PRM (OpenAI-compatible), e.g. https://api.xxx.com/v1.",
+            )
+            parser.add_argument(
+                "--prm-api-key",
+                type=str,
+                default=None,
+                help="API key for API-mode PRM. Can also be set via PRM_API_KEY env.",
+            )
+            parser.add_argument(
+                "--prm-api-model",
+                type=str,
+                default=None,
+                help="Model name for API-mode PRM (chat/completions).",
+            )
+            parser.add_argument(
+                "--prm-api-timeout",
+                type=float,
+                default=120.0,
+                help="HTTP timeout (seconds) for API-mode PRM calls.",
             )
             return parser
 
@@ -1729,13 +1760,25 @@ def slime_validate_args(args):
     if not args.prm_enable:
         args.prm_num_gpus = 0
     else:
-        assert args.prm_num_gpus > 0, "When --prm-enable is set, --prm-num-gpus must be > 0."
-        assert args.prm_num_gpus_per_engine > 0, "--prm-num-gpus-per-engine must be > 0."
-        assert args.prm_num_gpus % min(args.prm_num_gpus_per_engine, args.num_gpus_per_node) == 0, (
-            "prm_num_gpus must be divisible by min(prm_num_gpus_per_engine, num_gpus_per_node)."
-        )
-        if args.prm_model_path is None:
-            args.prm_model_path = args.hf_checkpoint
+        if args.prm_provider == "api":
+            # API-mode PRM does not launch local PRM engines.
+            args.prm_num_gpus = 0
+            if args.prm_api_base_url is None:
+                args.prm_api_base_url = os.getenv("PRM_API_BASE_URL")
+            if args.prm_api_key is None:
+                args.prm_api_key = os.getenv("PRM_API_KEY")
+            if args.prm_api_model is None:
+                args.prm_api_model = os.getenv("PRM_API_MODEL")
+            assert args.prm_api_base_url, "When --prm-provider api is set, --prm-api-base-url must be provided."
+            assert args.prm_api_model, "When --prm-provider api is set, --prm-api-model must be provided."
+        else:
+            assert args.prm_num_gpus > 0, "When --prm-enable is set, --prm-num-gpus must be > 0."
+            assert args.prm_num_gpus_per_engine > 0, "--prm-num-gpus-per-engine must be > 0."
+            assert args.prm_num_gpus % min(args.prm_num_gpus_per_engine, args.num_gpus_per_node) == 0, (
+                "prm_num_gpus must be divisible by min(prm_num_gpus_per_engine, num_gpus_per_node)."
+            )
+            if args.prm_model_path is None:
+                args.prm_model_path = args.hf_checkpoint
 
     if args.dump_details is not None:
         args.save_debug_rollout_data = f"{args.dump_details}/rollout_data/{{rollout_id}}.pt"
