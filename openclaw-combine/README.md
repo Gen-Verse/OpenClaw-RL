@@ -43,6 +43,16 @@ cd slime
 bash ../openclaw-combine/run_qwen3_4b_openclaw_combine.sh
 ```
 
+### Qwen3.5-4B
+
+Use the Qwen3.5 launch script and pass the local checkpoint path through environment variables:
+
+```bash
+HF_CKPT=/path/to/Qwen3.5-4B \
+PRM_MODEL_PATH=/path/to/Qwen3.5-4B \
+bash ../openclaw-combine/run_qwen3.5_4b_openclaw_combine.sh
+```
+
 ### Key Environment Variables
 
 | Variable | Default | Description |
@@ -59,6 +69,7 @@ All other variables (`NUM_GPUS`, `ACTOR_GPUS`, `HF_CKPT`, etc.) are shared with 
 openclaw-combine/
 ├── README.md
 ├── run_qwen3_4b_openclaw_combine.sh   # Launch script
+├── run_qwen3.5_4b_openclaw_combine.sh # Qwen3.5-4B launch script
 ├── openclaw_combine_api_server.py     # Async proxy: hint judge + PRM eval + sample submission
 ├── openclaw_combine_rollout.py        # Rollout bridge to SLIME trainer
 ├── combine_loss.py                    # Weighted advantage: w_rl * GRPO + w_opd * teacher

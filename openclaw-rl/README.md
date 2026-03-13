@@ -45,6 +45,16 @@ cd slime
 bash ../openclaw-rl/run_qwen3_4b_openclaw_rl.sh
 ```
 
+### Qwen3.5-4B
+
+Use the Qwen3.5 launch script and pass the local checkpoint path through environment variables:
+
+```bash
+HF_CKPT=/path/to/Qwen3.5-4B \
+PRM_MODEL_PATH=/path/to/Qwen3.5-4B \
+bash ../openclaw-rl/run_qwen3.5_4b_openclaw_rl.sh
+```
+
 
 
 ## File Structure
@@ -53,6 +63,7 @@ bash ../openclaw-rl/run_qwen3_4b_openclaw_rl.sh
 openclaw-rl/
 ├── README.md
 ├── run_qwen3_4b_openclaw_rl.sh     # Launch script
+├── run_qwen3.5_4b_openclaw_rl.sh   # Qwen3.5-4B launch script
 ├── openclaw_api_server.py           # FastAPI proxy + PRM scoring + sample submission
 ├── openclaw_rollout.py              # Async rollout worker (bridges API server ↔ SLIME trainer)
 └── results/                         # Runtime records (auto-created)
