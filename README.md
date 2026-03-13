@@ -57,11 +57,7 @@ Most RL-for-LLM systems assume centralized, batch-mode training with pre-collect
 
 
 <p align="center">
-<<<<<<< HEAD
-  <img src="assets/framework.png"  alt="Overview"  width="600">
-=======
   <img src="assets/framework.pdf"  alt="Overview"  width="600">
->>>>>>> 36d2996 (Update README.md)
 </p>
 
 
