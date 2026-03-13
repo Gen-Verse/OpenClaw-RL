@@ -34,6 +34,7 @@ class UpdateWeight(abc.ABC):
         self.args = args
         self.model = model
         self.weight_version = 0
+        self._name_transform = None  # Optional: callable(name) -> new_name or None to skip
 
     @abc.abstractmethod
     def connect_rollout_engines(
@@ -48,6 +49,10 @@ class UpdateWeight(abc.ABC):
         bucket = []
         bucket_size = 0
         for name, param in self.model.state_dict().items():
+            if self._name_transform is not None:
+                name = self._name_transform(name)
+                if name is None:
+                    continue
             param_size = param.numel() * param.element_size()
             if bucket and bucket_size + param_size >= self.args.update_weight_buffer_size:
                 self.wait_and_update_bucket_weights(bucket)

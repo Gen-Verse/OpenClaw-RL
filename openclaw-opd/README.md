@@ -34,7 +34,7 @@ bash ../openclaw-opd/run_qwen3_4b_openclaw_opd.sh
 
 ## Option B: Top-K Logits Distillation (SDFT/SDPO-style)
 
-Following [SDFT](https://arxiv.org/abs/2601.19897) and [SDPO](https://arxiv.org/abs/2601.20802), instead of single-token teacher targets, distill teacher top-K distribution per position.
+Following [SDFT](https://arxiv.org/abs/2601.19897) and [SDPO](https://arxiv.org/abs/2601.20802), instead of single-token teacher targets, distill teacher top-K distribution per position. But note that we use teacher top k instead of student top k (setting in their original paper), see issue #7. e will compare teacher top-K and student top-K later.
 
 - Teacher query: `input_top_logprobs` (`K` tokens per position).
 - Stored fields: `teacher_topk_log_probs [T,K]`, `teacher_topk_indices [T,K]`.

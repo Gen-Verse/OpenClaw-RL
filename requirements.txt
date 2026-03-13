@@ -177,6 +177,7 @@ outlines_core==0.1.26
 overrides==7.7.0
 packaging==25.0
 pandas==2.3.3
+peft>=0.12.0
 parso==0.8.5
 partial-json-parser==0.2.1.1.post7
 pathspec==1.0.1

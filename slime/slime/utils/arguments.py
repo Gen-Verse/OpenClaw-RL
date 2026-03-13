@@ -1924,6 +1924,9 @@ def slime_validate_args(args):
     if args.only_train_params_name_list and args.freeze_params_name_list:
         raise ValueError("You can only specify ONE of: --only-train-params-name-list, or --freeze-params-name-list.")
 
+    if getattr(args, "use_lora", False):
+        assert args.train_backend == "fsdp", "LoRA is only supported with --train-backend fsdp"
+
 
 def hf_validate_args(args, hf_config):
     def equal(x, y):

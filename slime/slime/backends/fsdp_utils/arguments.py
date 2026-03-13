@@ -47,6 +47,14 @@ class FSDPArgs:
 
     deterministic_mode: bool = False  # This name must be the same as Megatron's
 
+    # LoRA / PEFT
+    use_lora: bool = False
+    lora_rank: int = 8
+    lora_alpha: int = 16
+    lora_dropout: float = 0.0
+    lora_target_modules: str | None = None  # comma-separated, e.g. "q_proj,v_proj"
+    lora_modules_to_save: str | None = None  # modules kept fully trainable
+
     # Profile
     record_memory_history: bool = False
     memory_snapshot_path: str = "snapshot.pickle"

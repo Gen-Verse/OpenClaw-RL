@@ -93,6 +93,14 @@ class FSDPTrainRayActor(TrainRayActor):
 
         model.train()
 
+        # Apply LoRA adapters before FSDP wrapping
+        self._is_lora = getattr(self.args, "use_lora", False)
+        if self._is_lora:
+            from .lora_utils import apply_lora, propagate_no_split_modules
+
+            model = apply_lora(model, self.args)
+            model = propagate_no_split_modules(model)
+
         full_state = model.state_dict()
 
         model = apply_fsdp2(model, mesh=self.dp_mesh, cpu_offload=self.fsdp_cpu_offload, args=self.args)
@@ -104,11 +112,21 @@ class FSDPTrainRayActor(TrainRayActor):
         self.model = model
 
         if args.gradient_checkpointing:
-            self.model.gradient_checkpointing_enable()
+            # LoRA freezes base params, so reentrant checkpointing fails
+            # (inputs don't have requires_grad=True). Use non-reentrant mode.
+            gc_kwargs = {"use_reentrant": False} if self._is_lora else {}
+            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gc_kwargs)
+
+        # For LoRA, only pass trainable parameters to the optimizer
+        optim_params = (
+            [p for p in self.model.parameters() if p.requires_grad]
+            if self._is_lora
+            else self.model.parameters()
+        )
 
         if args.optimizer == "adam":
             self.optimizer = torch.optim.AdamW(
-                self.model.parameters(),
+                optim_params,
                 lr=args.lr,
                 betas=(args.adam_beta1, args.adam_beta2),
                 eps=args.adam_eps,
@@ -135,6 +153,23 @@ class FSDPTrainRayActor(TrainRayActor):
             if self.args.colocate
             else UpdateWeightFromDistributed(self.args, self.model)
         )
+
+        # When LoRA is enabled, PEFT wraps parameter names with prefixes that
+        # SGLang doesn't understand.  Strip them and skip adapter-only params.
+        if self._is_lora:
+
+            def _lora_name_transform(name: str) -> str | None:
+                # Skip LoRA adapter parameters — SGLang only needs merged base weights
+                if "lora_A" in name or "lora_B" in name or "lora_embedding" in name:
+                    return None
+                # Strip PEFT outer prefix: base_model.model.xxx → xxx
+                if name.startswith("base_model.model."):
+                    name = name[len("base_model.model."):]
+                # Strip .base_layer. inserted by PEFT for LoRA-targeted modules
+                name = name.replace(".base_layer.", ".")
+                return name
+
+            self.weight_updater._name_transform = _lora_name_transform
 
         checkpoint.finalize_load(self, checkpoint_payload)
 
@@ -539,7 +574,12 @@ class FSDPTrainRayActor(TrainRayActor):
             if dist.get_rank() == 0:
                 logger.info(f"Updating ref model at rollout_id {rollout_id}")
             # Copy actor model state to ref model
-            actor_state = self.model.state_dict()
+            if self._is_lora:
+                from .lora_utils import get_merged_state_dict
+
+                actor_state = get_merged_state_dict(self.model)
+            else:
+                actor_state = self.model.state_dict()
             self.ref_model.load_state_dict(actor_state)
             self.ref_model.cpu()
 
@@ -549,11 +589,13 @@ class FSDPTrainRayActor(TrainRayActor):
         logits = self.model(**model_args).logits.squeeze(0).float()
 
         # Compute log probs and entropy
+        need_entropy = self.args.entropy_coef != 0.0
         log_probs, entropy_result = get_logprob_and_entropy(
             logits=logits,
             target_tokens=packed_batch["tokens"],
             allow_compile=not self.args.true_on_policy_mode,
             temperature=self.args.rollout_temperature,
+            compute_entropy=need_entropy,
         )
         packed_batch["cur_log_probs"] = log_probs
         packed_batch["entropy"] = entropy_result
@@ -735,7 +777,15 @@ class FSDPTrainRayActor(TrainRayActor):
             if dist.get_rank() == 0:
                 ray.get(self.rollout_manager.clear_num_new_engines.remote())
 
-        self.weight_updater.update_weights()
+        # Merge LoRA into base weights before syncing to SGLang rollout engines.
+        # SGLang doesn't understand LoRA adapters, so it needs the merged model.
+        if self._is_lora:
+            self.model.merge_adapter()
+        try:
+            self.weight_updater.update_weights()
+        finally:
+            if self._is_lora:
+                self.model.unmerge_adapter()
 
         if self.args.ci_test and len(rollout_engines) > 0:
             engine = random.choice(rollout_engines)
@@ -861,6 +911,7 @@ def get_logprob_and_entropy(
     target_tokens: torch.Tensor,
     allow_compile: bool,
     temperature: float | None = None,
+    compute_entropy: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute log probabilities and entropy.
 
@@ -869,6 +920,8 @@ def get_logprob_and_entropy(
         target_tokens: Target tokens with shape [seq_len]
         allow_compile: Whether to allow compilation
         temperature: Temperature parameter (optional)
+        compute_entropy: If False, skip the expensive full-vocab softmax and
+            return zeros for entropy. Saves ~3x [seq_len, vocab_size] memory.
 
     Returns:
         log_probs: Log probabilities with shape [seq_len - 1]
@@ -878,9 +931,12 @@ def get_logprob_and_entropy(
     log_probs = gather_log_probs_packed(
         shifted_logits, target_tokens, allow_compile=allow_compile, temperature=temperature
     )
-    log_probs_full = torch.log_softmax(shifted_logits, dim=-1)
-    probs = torch.softmax(shifted_logits, dim=-1)
-    entropy = -(probs * log_probs_full).sum(dim=-1)
+    if compute_entropy:
+        log_probs_full = torch.log_softmax(shifted_logits, dim=-1)
+        probs = torch.softmax(shifted_logits, dim=-1)
+        entropy = -(probs * log_probs_full).sum(dim=-1)
+    else:
+        entropy = torch.zeros_like(log_probs)
     return log_probs, entropy
 
 
@@ -936,8 +992,12 @@ def apply_fsdp2(model, mesh=None, cpu_offload=False, args=None):
 
     offload_policy = CPUOffloadPolicy() if cpu_offload else None
 
-    layer_cls_to_wrap = model._no_split_modules
-    assert len(layer_cls_to_wrap) > 0 and layer_cls_to_wrap[0] is not None
+    layer_cls_to_wrap = getattr(model, "_no_split_modules", None)
+    # When PEFT wraps the model, _no_split_modules may live on the inner model
+    if not layer_cls_to_wrap and hasattr(model, "base_model"):
+        inner = getattr(model.base_model, "model", model.base_model)
+        layer_cls_to_wrap = getattr(inner, "_no_split_modules", None)
+    assert layer_cls_to_wrap and len(layer_cls_to_wrap) > 0 and layer_cls_to_wrap[0] is not None
 
     modules = [
         module

@@ -108,16 +108,29 @@ def load(actor: Any) -> dict[str, Any] | None:
         logger.info(f"[FSDP] Model checkpoint {model_dir} not found; skipping load.")
         return None
 
-    # Load model weights (always)
-    model_state = ModelState(actor.model)
-    state_dict = {"model_state": model_state}
+    # Load model weights (LoRA-only when applicable)
+    is_lora = getattr(actor, "_is_lora", False)
+    adapter_file = model_dir / "adapter_weights.pt"
 
-    try:
-        dcp.load(state_dict=state_dict, checkpoint_id=str(model_dir))
-        logger.info(f"[FSDP] Loaded model from {model_dir}")
-    except Exception as e:
-        logger.error(f"[FSDP] Failed to load model from {model_dir}: {e}")
-        return None
+    if is_lora and adapter_file.exists():
+        from .lora_utils import load_lora_checkpoint
+
+        try:
+            load_lora_checkpoint(actor.model, model_dir)
+            logger.info(f"[FSDP] Loaded LoRA adapter from {model_dir}")
+        except Exception as e:
+            logger.error(f"[FSDP] Failed to load LoRA adapter from {model_dir}: {e}")
+            return None
+    else:
+        model_state = ModelState(actor.model)
+        state_dict = {"model_state": model_state}
+
+        try:
+            dcp.load(state_dict=state_dict, checkpoint_id=str(model_dir))
+            logger.info(f"[FSDP] Loaded model from {model_dir}")
+        except Exception as e:
+            logger.error(f"[FSDP] Failed to load model from {model_dir}: {e}")
+            return None
 
     # Load optimizer state (optional)
     load_optimizer = not getattr(actor.args, "no_load_optim", False) and hasattr(actor, "optimizer")
@@ -209,10 +222,16 @@ def save(actor: Any, iteration: int) -> None:
         lr_scheduler_dir.mkdir(parents=True, exist_ok=True)
     dist.barrier()
 
-    # Save model weights
-    model_state = ModelState(actor.model)
-    state_dict = {"model_state": model_state}
-    dcp.save(state_dict, checkpoint_id=str(model_dir))
+    # Save model weights (LoRA-only when applicable)
+    is_lora = getattr(actor, "_is_lora", False)
+    if is_lora:
+        from .lora_utils import save_lora_checkpoint
+
+        save_lora_checkpoint(actor.model, model_dir)
+    else:
+        model_state = ModelState(actor.model)
+        state_dict = {"model_state": model_state}
+        dcp.save(state_dict, checkpoint_id=str(model_dir))
 
     # Save optimizer state (skip if --no-save-optim is set)
     save_optimizer_state = not getattr(actor.args, "no_save_optim", False)
