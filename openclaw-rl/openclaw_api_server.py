@@ -18,6 +18,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from slime.utils.processing_utils import load_tokenizer
 from slime.utils.types import Sample
 
+from feedback_store import FeedbackStore
+from reward_model import RewardModelManager
+
 _GREEN = "\033[32m"
 _YELLOW = "\033[33m"
 _RED = "\033[31m"
@@ -241,6 +244,23 @@ class OpenClawAPIServer:
 
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
+
+        # --- Reward Model & Feedback Store ---
+        self._feedback_store = FeedbackStore(
+            store_path=os.getenv("OPENCLAW_FEEDBACK_STORE_FILE", "results/feedback_store.jsonl")
+        )
+        self._reward_model_enabled = os.getenv("REWARD_MODEL_ENABLE", "0") == "1"
+        self._rm_manager = None
+        if self._reward_model_enabled:
+            rm_path = os.getenv("REWARD_MODEL_PATH", getattr(args, "hf_checkpoint", ""))
+            self._rm_manager = RewardModelManager(
+                model_path=rm_path,
+                feedback_store=self._feedback_store,
+                train_interval=int(os.getenv("REWARD_MODEL_TRAIN_INTERVAL", "300")),
+                lr=float(os.getenv("REWARD_MODEL_LR", "1e-5")),
+            )
+            logger.info("[OpenClaw] Reward Model enabled: path=%s", rm_path)
+
         self.app = self._build_app()
 
     # ------------------------------------------------------------------ app
@@ -280,6 +300,55 @@ class OpenClawAPIServer:
             if stream:
                 return StreamingResponse(owner._stream_response(result), media_type="text/event-stream")
             return JSONResponse(content=result["response"])
+
+        @app.post("/v1/feedback")
+        async def feedback(request: Request):
+            owner: OpenClawAPIServer = request.app.state.owner
+            body = await request.json()
+            session_id = body.get("session_id")
+            turn_num = body.get("turn")
+            message_index = body.get("message_index")
+            feedback_type = body.get("feedback_type")
+
+            if feedback_type == "thumbs_down" and session_id:
+                if turn_num is not None:
+                    try:
+                        turn_num = int(turn_num)
+                    except (TypeError, ValueError):
+                        logger.warning("[OpenClaw] invalid turn for thumbs_down: %r", turn_num)
+                        turn_num = None
+                logger.info("[OpenClaw] Received thumbs_down for session=%s turn=%s", session_id, turn_num)
+                if turn_num is None:
+                    turn_num = owner._turn_counts.get(session_id)
+
+                td = None
+                if turn_num is not None:
+                    td = owner._pending_turn_data.get(session_id, {}).get(turn_num)
+
+                record = owner._feedback_store.get_latest_record(session_id, turn_num)
+                if td:
+                    owner._feedback_store.add_negative(
+                        session_id=session_id,
+                        turn=turn_num,
+                        prompt_text=td["prompt_text"],
+                        response_text=td["response_text"],
+                        message_index=message_index,
+                    )
+                elif record:
+                    owner._feedback_store.add_negative(
+                        session_id=session_id,
+                        turn=record.turn,
+                        prompt_text=record.prompt_text,
+                        response_text=record.response_text,
+                        message_index=message_index,
+                    )
+                else:
+                    logger.warning(
+                        "[OpenClaw] thumbs_down ignored: no feedback record found for session=%s turn=%s",
+                        session_id,
+                        turn_num,
+                    )
+            return {"status": "ok"}
 
         return app
 
@@ -555,6 +624,16 @@ class OpenClawAPIServer:
             )
             self._buffer_record(session_id, turn_num, messages, prompt_text, response_text, tool_calls)
             self._pending_turn_data.setdefault(session_id, {})[turn_num] = turn_data
+
+            # Seed the feedback store with an implicit positive for this turn.
+            # A later thumbs-down rewrites the stored label for the same turn.
+            self._feedback_store.add_positive(
+                session_id=session_id,
+                turn=turn_num,
+                prompt_text=prompt_text,
+                response_text=response_text
+            )
+
             self._maybe_submit_ready_samples(session_id)
         else:
             logger.info("[OpenClaw] SIDE session=%s → skipped (no training data)", session_id)
@@ -608,6 +687,18 @@ class OpenClawAPIServer:
             score = prm_result["score"]
         else:
             score = 0.0
+
+        # Incorporate Learned Reward Model score if enabled
+        rm_score = 0.0
+        if self._rm_manager:
+            try:
+                rm_score = self._rm_manager.score(turn_data["prompt_text"], turn_data["response_text"])
+                logger.info("[OpenClaw] Reward Model score=%.4f", rm_score)
+                # Combine scores: e.g., average or take RM score if available.
+                # Here we take the mean of PRM and RM scores.
+                score = (score + rm_score) / 2.0
+            except Exception as e:
+                logger.warning("[OpenClaw] Reward Model scoring failed: %s", e)
 
         with self._eval_scores_lock:
             self._eval_scores.append(score)
@@ -683,6 +774,10 @@ class OpenClawAPIServer:
         self._server = uvicorn.Server(config=config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
         self._thread.start()
+        
+        if self._rm_manager:
+            self._rm_manager.start_background_training()
+            
         self._readiness_thread = threading.Thread(target=self._wait_for_sglang_ready, daemon=True)
         self._readiness_thread.start()
 
@@ -726,5 +821,7 @@ class OpenClawAPIServer:
     def stop(self):
         if self._server is not None:
             self._server.should_exit = True
+        if self._rm_manager:
+            self._rm_manager.stop_background_training()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
