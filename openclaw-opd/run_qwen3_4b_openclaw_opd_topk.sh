@@ -32,6 +32,8 @@ export RAY_num_heartbeats_timeout=60
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 SLIME_ROOT="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
 source "${SLIME_ROOT}/scripts/models/qwen3-4B.sh"
+cd "${SLIME_ROOT}"
+echo "Current Working Directory: $(pwd)"
 
 HF_CKPT=${HF_CKPT:-/absolute/path/to/Qwen3-4B-Thinking-2507}
 REF_LOAD=${REF_LOAD:-${HF_CKPT}}
