@@ -250,6 +250,11 @@ class OpenClawAPIServer:
             store_path=os.getenv("OPENCLAW_FEEDBACK_STORE_FILE", "results/feedback_store.jsonl")
         )
         self._reward_model_enabled = os.getenv("REWARD_MODEL_ENABLE", "0") == "1"
+        self._reward_model_score_enabled = os.getenv("REWARD_MODEL_SCORE_ENABLE", "0") == "1"
+        self._reward_model_min_records = int(os.getenv("REWARD_MODEL_MIN_RECORDS", "50"))
+        self._reward_model_min_negatives = int(os.getenv("REWARD_MODEL_MIN_NEGATIVES", "5"))
+        self._rm_warmup_logged = False
+        self._rm_ready_logged = False
         self._rm_manager = None
         if self._reward_model_enabled:
             rm_path = os.getenv("REWARD_MODEL_PATH", getattr(args, "hf_checkpoint", ""))
@@ -259,7 +264,15 @@ class OpenClawAPIServer:
                 train_interval=int(os.getenv("REWARD_MODEL_TRAIN_INTERVAL", "300")),
                 lr=float(os.getenv("REWARD_MODEL_LR", "1e-5")),
             )
-            logger.info("[OpenClaw] Reward Model enabled: path=%s", rm_path)
+            logger.info(
+                "[OpenClaw] Reward Model enabled: path=%s score_enabled=%s warmup=(records>=%d negatives>=%d)",
+                rm_path,
+                self._reward_model_score_enabled,
+                self._reward_model_min_records,
+                self._reward_model_min_negatives,
+            )
+        elif self._reward_model_score_enabled:
+            logger.warning("[OpenClaw] REWARD_MODEL_SCORE_ENABLE ignored because REWARD_MODEL_ENABLE=0")
 
         self.app = self._build_app()
 
@@ -302,8 +315,12 @@ class OpenClawAPIServer:
             return JSONResponse(content=result["response"])
 
         @app.post("/v1/feedback")
-        async def feedback(request: Request):
+        async def feedback(
+            request: Request,
+            authorization: str | None = Header(default=None),
+        ):
             owner: OpenClawAPIServer = request.app.state.owner
+            await owner._check_auth(authorization)
             body = await request.json()
             session_id = body.get("session_id")
             turn_num = body.get("turn")
@@ -360,6 +377,26 @@ class OpenClawAPIServer:
         token = authorization.split(" ", 1)[1].strip()
         if token != self.expected_api_key:
             raise HTTPException(status_code=401, detail="invalid api key")
+
+    def _reward_model_scoring_status(self) -> tuple[bool, str]:
+        if not self._rm_manager:
+            return False, "disabled"
+        if not self._reward_model_score_enabled:
+            return False, "score disabled"
+
+        total_records = len(self._feedback_store)
+        negatives = self._feedback_store.num_negatives
+        if total_records < self._reward_model_min_records:
+            return False, (
+                f"warm-up waiting for total feedback "
+                f"({total_records}/{self._reward_model_min_records})"
+            )
+        if negatives < self._reward_model_min_negatives:
+            return False, (
+                f"warm-up waiting for negative feedback "
+                f"({negatives}/{self._reward_model_min_negatives})"
+            )
+        return True, "ready"
 
     # ---------------------------------------------------- record file
     def _flush_pending_record(self, session_id: str, next_state):
@@ -688,17 +725,23 @@ class OpenClawAPIServer:
         else:
             score = 0.0
 
-        # Incorporate Learned Reward Model score if enabled
+        # Incorporate Learned Reward Model score only when explicitly enabled
+        # and warmed up on enough feedback data.
         rm_score = 0.0
-        if self._rm_manager:
+        rm_ready, rm_status = self._reward_model_scoring_status()
+        if rm_ready:
             try:
                 rm_score = self._rm_manager.score(turn_data["prompt_text"], turn_data["response_text"])
+                if not self._rm_ready_logged:
+                    logger.info("[OpenClaw] Reward Model scoring activated after warm-up.")
+                    self._rm_ready_logged = True
                 logger.info("[OpenClaw] Reward Model score=%.4f", rm_score)
-                # Combine scores: e.g., average or take RM score if available.
-                # Here we take the mean of PRM and RM scores.
                 score = (score + rm_score) / 2.0
             except Exception as e:
                 logger.warning("[OpenClaw] Reward Model scoring failed: %s", e)
+        elif self._rm_manager and self._reward_model_score_enabled and not self._rm_warmup_logged:
+            logger.info("[OpenClaw] Reward Model scoring gated: %s", rm_status)
+            self._rm_warmup_logged = True
 
         with self._eval_scores_lock:
             self._eval_scores.append(score)

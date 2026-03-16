@@ -85,6 +85,7 @@ class RewardModelManager:
         self.model = RewardModel(model_path, device=device)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
         self.criterion = nn.MSELoss()
+        self._model_lock = threading.RLock()
         
         self.batch_size = batch_size
         self.train_interval = train_interval
@@ -128,21 +129,23 @@ class RewardModelManager:
         dataset = FeedbackDataset(records, self.tokenizer)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        self.model.train()
-        total_loss = 0
-        for batch in dataloader:
-            input_ids = batch["input_ids"].to(self.model.device)
-            attention_mask = batch["attention_mask"].to(self.model.device)
-            labels = batch["label"].to(self.model.device)
+        with self._model_lock:
+            self.model.train()
+            total_loss = 0
+            for batch in dataloader:
+                input_ids = batch["input_ids"].to(self.model.device)
+                attention_mask = batch["attention_mask"].to(self.model.device)
+                labels = batch["label"].to(self.model.device)
 
-            self.optimizer.zero_grad()
-            outputs = self.model(input_ids, attention_mask)
-            loss = self.criterion(outputs, labels)
-            loss.backward()
-            self.optimizer.step()
-            total_loss += loss.item()
+                self.optimizer.zero_grad()
+                outputs = self.model(input_ids, attention_mask)
+                loss = self.criterion(outputs, labels)
+                loss.backward()
+                self.optimizer.step()
+                total_loss += loss.item()
 
         logger.info(f"[RewardModel] Train step completed. Avg Loss: {total_loss/len(dataloader):.4f}")
 
     def score(self, prompt: str, response: str) -> float:
-        return self.model.get_reward(prompt, response, self.tokenizer)
+        with self._model_lock:
+            return self.model.get_reward(prompt, response, self.tokenizer)
