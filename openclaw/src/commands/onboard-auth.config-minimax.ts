@@ -112,7 +112,7 @@ export function applyMinimaxHostedConfig(
 // MiniMax Anthropic-compatible API (platform.minimax.io/anthropic)
 export function applyMinimaxApiProviderConfig(
   cfg: OpenClawConfig,
-  modelId: string = "MiniMax-M2.5",
+  modelId: string = "MiniMax-M2.7",
 ): OpenClawConfig {
   return applyMinimaxApiProviderConfigWithBaseUrl(cfg, {
     providerId: "minimax",
@@ -123,7 +123,7 @@ export function applyMinimaxApiProviderConfig(
 
 export function applyMinimaxApiConfig(
   cfg: OpenClawConfig,
-  modelId: string = "MiniMax-M2.5",
+  modelId: string = "MiniMax-M2.7",
 ): OpenClawConfig {
   return applyMinimaxApiConfigWithBaseUrl(cfg, {
     providerId: "minimax",
@@ -135,7 +135,7 @@ export function applyMinimaxApiConfig(
 // MiniMax China API (api.minimaxi.com)
 export function applyMinimaxApiProviderConfigCn(
   cfg: OpenClawConfig,
-  modelId: string = "MiniMax-M2.5",
+  modelId: string = "MiniMax-M2.7",
 ): OpenClawConfig {
   return applyMinimaxApiProviderConfigWithBaseUrl(cfg, {
     providerId: "minimax-cn",
@@ -146,7 +146,7 @@ export function applyMinimaxApiProviderConfigCn(
 
 export function applyMinimaxApiConfigCn(
   cfg: OpenClawConfig,
-  modelId: string = "MiniMax-M2.5",
+  modelId: string = "MiniMax-M2.7",
 ): OpenClawConfig {
   return applyMinimaxApiConfigWithBaseUrl(cfg, {
     providerId: "minimax-cn",
