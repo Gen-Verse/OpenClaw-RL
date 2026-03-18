@@ -58,6 +58,14 @@ class TinkerConfig:
     api_key: str = ""
     max_context_tokens: int = 20000
 
+    # -- Turn classification --
+    # Default turn type when neither X-Turn-Type header nor body field is
+    # provided by the client.  Standard OpenAI-compatible clients (including
+    # OpenClaw) do not send turn-type metadata, so "main" ensures their
+    # turns are collected for training by default.  Set to "side" to require
+    # explicit opt-in via the X-Turn-Type header.
+    default_turn_type: str = "main"
+
     # -- Logging --
     record_dir: str = "records/"
     wandb_project: str = "openclaw-tinker"

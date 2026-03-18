@@ -207,7 +207,7 @@ class _BaseServer:
 
             body = await request.json()
             session_id = x_session_id or body.get("session_id") or "unknown"
-            turn_type = (x_turn_type or body.get("turn_type") or "side").strip().lower()
+            turn_type = (x_turn_type or body.get("turn_type") or owner.config.default_turn_type).strip().lower()
             session_done = (
                 (x_session_done and x_session_done.strip().lower() in {"1", "true", "yes", "on"})
                 or str(body.get("session_done", "")).strip().lower() in {"1", "true", "yes", "on"}

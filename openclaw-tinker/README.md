@@ -93,6 +93,7 @@ All parameters can be set via CLI flags or environment variables:
 | `--proxy-port` | `PROXY_PORT` | `30000` | API server bind port |
 | `--served-model-name` | `SERVED_MODEL_NAME` | `qwen3-4b` | Model name in OpenAI API responses |
 | `--api-key` | `SGLANG_API_KEY` | | API key for proxy authentication |
+| `--default-turn-type` | `DEFAULT_TURN_TYPE` | `main` | Default turn type when client omits `X-Turn-Type` header (`main` or `side`) |
 
 ## Training Methods
 

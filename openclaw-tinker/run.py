@@ -66,6 +66,9 @@ def parse_args() -> TinkerConfig:
     parser.add_argument("--proxy-port", type=int, default=int(os.getenv("PROXY_PORT", "30000")))
     parser.add_argument("--served-model-name", default=os.getenv("SERVED_MODEL_NAME", "qwen3-4b"))
     parser.add_argument("--api-key", default=os.getenv("SGLANG_API_KEY", ""))
+    parser.add_argument("--default-turn-type", default=os.getenv("DEFAULT_TURN_TYPE", "main"),
+                        choices=["main", "side"],
+                        help="Default turn type when client sends no X-Turn-Type header (default: main)")
 
     # Logging
     parser.add_argument("--record-dir", default=os.getenv("RECORD_DIR", "records/"))
@@ -95,6 +98,7 @@ def parse_args() -> TinkerConfig:
         proxy_port=args.proxy_port,
         served_model_name=args.served_model_name,
         api_key=args.api_key,
+        default_turn_type=args.default_turn_type,
         record_dir=args.record_dir,
         wandb_project=args.wandb_project,
     )
