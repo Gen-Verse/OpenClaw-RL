@@ -44,7 +44,7 @@ For a high-level overview, see [Onboarding Wizard](/start/wizard).
     - More detail: [Vercel AI Gateway](/providers/vercel-ai-gateway)
     - **Cloudflare AI Gateway**: prompts for Account ID, Gateway ID, and `CLOUDFLARE_AI_GATEWAY_API_KEY`.
     - More detail: [Cloudflare AI Gateway](/providers/cloudflare-ai-gateway)
-    - **MiniMax M2.5**: config is auto-written.
+    - **MiniMax M2.7**: config is auto-written.
     - More detail: [MiniMax](/providers/minimax)
     - **Synthetic (Anthropic-compatible)**: prompts for `SYNTHETIC_API_KEY`.
     - More detail: [Synthetic](/providers/synthetic)

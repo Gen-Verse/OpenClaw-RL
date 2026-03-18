@@ -110,7 +110,7 @@ describe("applyAuthChoiceMiniMax", () => {
       token: "mm-opts-token",
       profileId: "minimax:default",
       provider: "minimax",
-      expectedModel: "minimax/MiniMax-M2.5",
+      expectedModel: "minimax/MiniMax-M2.7",
     },
     {
       caseName:
@@ -120,7 +120,7 @@ describe("applyAuthChoiceMiniMax", () => {
       token: "mm-cn-opts-token",
       profileId: "minimax-cn:default",
       provider: "minimax-cn",
-      expectedModel: "minimax-cn/MiniMax-M2.5",
+      expectedModel: "minimax-cn/MiniMax-M2.7",
     },
   ])(
     "$caseName",
@@ -182,7 +182,7 @@ describe("applyAuthChoiceMiniMax", () => {
         mode: "api_key",
       });
       expect(resolveAgentModelPrimaryValue(result?.config.agents?.defaults?.model)).toBe(
-        "minimax-cn/MiniMax-M2.5",
+        "minimax-cn/MiniMax-M2.7",
       );
     }
     expect(text).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ describe("applyAuthChoiceMiniMax", () => {
       mode: "api_key",
     });
     expect(resolveAgentModelPrimaryValue(result?.config.agents?.defaults?.model)).toBe(
-      "minimax/MiniMax-M2.5-highspeed",
+      "minimax/MiniMax-M2.7-highspeed",
     );
     expect(text).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
