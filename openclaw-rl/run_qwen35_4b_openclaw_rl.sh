@@ -1,18 +1,22 @@
 #!/bin/bash
 
-pkill -9 sglang
-sleep 3
-ray stop --force
-pkill -9 ray
-pkill -9 python
-sleep 3
-pkill -9 ray
-pkill -9 python
+SKIP_CLUSTER_CLEANUP=${SKIP_CLUSTER_CLEANUP:-0}
+if [ "${SKIP_CLUSTER_CLEANUP}" != "1" ]; then
+  pkill -9 sglang
+  sleep 3
+  ray stop --force
+  pkill -9 ray
+  pkill -9 python
+  sleep 3
+  pkill -9 ray
+  pkill -9 python
+fi
 
 set -ex
 
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
+export FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-/tmp}"
 
 NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
@@ -52,6 +56,7 @@ export CONTEXT_LENGTH="32768"
 export MEM_FRACTION_STATIC="0.85"
 export REASONING_PARSER="${REASONING_PARSER:-qwen3}"
 export TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen25}"
+export SGLANG_LANGUAGE_ONLY="${SGLANG_LANGUAGE_ONLY:-1}"
 export PRM_M="${PRM_M:-3}"
 TRAIN_TP=${TRAIN_TP:-4}
 ROLLOUT_NUM_GPUS_PER_ENGINE=${ROLLOUT_NUM_GPUS_PER_ENGINE:-2}
@@ -132,6 +137,10 @@ SGLANG_ARGS=(
    --sglang-reasoning-parser "${REASONING_PARSER}"
 )
 
+if [ "${SGLANG_LANGUAGE_ONLY}" = "1" ]; then
+  SGLANG_ARGS+=(--sglang-language-only)
+fi
+
 if [ "${PRM_ENABLE}" = "1" ]; then
   PRM_ARGS=(
      --prm-enable
@@ -180,7 +189,8 @@ ray start --head --node-ip-address "${MASTER_ADDR}" --num-gpus "${NUM_GPUS}" --d
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"${MEGATRON_ROOT}:${SCRIPT_DIR}:${SLIME_ROOT}\",
-    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\"
+    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
+    \"FLASHINFER_WORKSPACE_BASE\": \"${FLASHINFER_WORKSPACE_BASE}\"
   }
 }"
 
