@@ -505,6 +505,13 @@ def _compute_server_args(
         model_path,
         language_only=getattr(args, "sglang_language_only", False),
     )
+    server_language_only = getattr(args, "sglang_language_only", False)
+    # Once Qwen3.5 has been materialized as a text-only shadow checkpoint, we should
+    # stop forwarding `language_only` to SGLang. Recent SGLang builds interpret the
+    # flag as encoder disaggregation and require `--encoder-urls`, even though the
+    # shadow checkpoint is already a plain text model.
+    if model_path != original_model_path and is_qwen35_model_path(model_path):
+        server_language_only = False
     if is_qwen35_model_path(model_path) or is_qwen35_model_path(original_model_path):
         os.environ["SLIME_ENABLE_QWEN35_SGLANG_PATCH"] = "1"
 
@@ -558,6 +565,10 @@ def _compute_server_args(
     unused_keys = set(kwargs.keys())
     for attr in dataclasses.fields(ServerArgs):
         if worker_type == "decode" and attr.name == "enable_hierarchical_cache":
+            continue
+        if attr.name == "language_only":
+            kwargs[attr.name] = server_language_only
+            unused_keys.discard(attr.name)
             continue
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:
             kwargs[attr.name] = getattr(args, f"sglang_{attr.name}")
