@@ -31,7 +31,9 @@ export RAY_health_check_timeout_ms=30000
 export RAY_num_heartbeats_timeout=60
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
 SLIME_ROOT="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
+MEGATRON_ROOT="$(cd -- "${REPO_ROOT}/Megatron-LM" &>/dev/null && pwd)"
 source "${SLIME_ROOT}/scripts/models/qwen3.5-4B.sh"
 
 HF_CKPT=${HF_CKPT:-/absolute/path/to/Qwen3.5-4B}
@@ -51,6 +53,10 @@ export MEM_FRACTION_STATIC="0.85"
 export REASONING_PARSER="${REASONING_PARSER:-qwen3}"
 export TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen25}"
 export PRM_M="${PRM_M:-3}"
+TRAIN_TP=${TRAIN_TP:-4}
+ROLLOUT_NUM_GPUS_PER_ENGINE=${ROLLOUT_NUM_GPUS_PER_ENGINE:-2}
+PRM_NUM_GPUS_PER_ENGINE=${PRM_NUM_GPUS_PER_ENGINE:-2}
+PRM_ENABLE=${PRM_ENABLE:-1}
 
 CKPT_ARGS=(
    --megatron-to-hf-mode bridge
@@ -77,7 +83,7 @@ ROLLOUT_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 4
+   --tensor-model-parallel-size "${TRAIN_TP}"
    --sequence-parallel
    --pipeline-model-parallel-size 1
    --context-parallel-size 1
@@ -119,22 +125,26 @@ OPTIMIZER_ARGS=(
 EVAL_ARGS=()
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
+   --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
    --sglang-tool-call-parser "${TOOL_CALL_PARSER}"
    --sglang-mem-fraction-static 0.85
    --sglang-context-length 32768
    --sglang-reasoning-parser "${REASONING_PARSER}"
 )
 
-PRM_ARGS=(
-   --prm-enable
-   --prm-num-gpus "${PRM_GPUS}"
-   --prm-num-gpus-per-engine 2
-   --prm-model-path "${PRM_MODEL_PATH}"
-   --prm-m "${PRM_M}"
-   --prm-temperature "${PRM_TEMPERATURE:-0.6}"
-   --prm-max-new-tokens "${PRM_MAX_NEW_TOKENS:-4096}"
-)
+if [ "${PRM_ENABLE}" = "1" ]; then
+  PRM_ARGS=(
+     --prm-enable
+     --prm-num-gpus "${PRM_GPUS}"
+     --prm-num-gpus-per-engine "${PRM_NUM_GPUS_PER_ENGINE}"
+     --prm-model-path "${PRM_MODEL_PATH}"
+     --prm-m "${PRM_M}"
+     --prm-temperature "${PRM_TEMPERATURE:-0.6}"
+     --prm-max-new-tokens "${PRM_MAX_NEW_TOKENS:-4096}"
+  )
+else
+  PRM_ARGS=()
+fi
 
 CUSTOM_ARGS=(
    --custom-generate-function-path openclaw_api_server.generate
@@ -169,7 +179,7 @@ ray start --head --node-ip-address "${MASTER_ADDR}" --num-gpus "${NUM_GPUS}" --d
 
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/absolute/path/to/OpenClaw-RL/Megatron-LM/:${SCRIPT_DIR}:${SLIME_ROOT}\",
+    \"PYTHONPATH\": \"${MEGATRON_ROOT}:${SCRIPT_DIR}:${SLIME_ROOT}\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\"
   }
 }"
