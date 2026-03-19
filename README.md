@@ -238,7 +238,7 @@ For detailed environment setup, see [Slime](https://github.com/THUDM/slime) or [
 
 #### Don't have a GPU?
 
-Create a [Tinker API](https://github.com/THUDM/slime). That's all you need. But note that Tinker only supports LoRA, which may not be as effective as full fine-tuning. So we are still testing it.
+Create a [Tinker API](https://thinkingmachines.ai/tinker/). That's all you need. But note that Tinker only supports LoRA, which may not be as effective as full fine-tuning. So we are still testing it.
 
 
 
