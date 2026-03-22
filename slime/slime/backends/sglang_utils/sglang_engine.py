@@ -13,6 +13,7 @@ from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
+from .qwen3_5 import is_qwen35_model_path, maybe_prepare_qwen35_text_model, patch_sglang_qwen35
 from slime.ray.ray_actor import RayActor
 from slime.utils.http_utils import get_host_info
 
@@ -51,11 +52,9 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
 
 
 def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
-    from sglang.srt.entrypoints.http_server import launch_server
-
     multiprocessing.set_start_method("spawn", force=True)
     server_args.host = server_args.host.strip("[]")
-    p = multiprocessing.Process(target=launch_server, args=(server_args,))
+    p = multiprocessing.Process(target=_launch_server_entry, args=(server_args,))
     p.start()
 
     if server_args.node_rank != 0:
@@ -68,6 +67,13 @@ def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
     )
 
     return p
+
+
+def _launch_server_entry(server_args: ServerArgs):
+    patch_sglang_qwen35()
+    from sglang.srt.entrypoints.http_server import launch_server
+
+    launch_server(server_args)
 
 
 def _wait_server_healthy(base_url, api_key, is_process_alive):
@@ -493,7 +499,21 @@ def _compute_server_args(
 ):
     is_prm = engine_role == "prm"
     gpus_per_engine = args.prm_num_gpus_per_engine if is_prm else args.rollout_num_gpus_per_engine
-    model_path = args.prm_model_path if is_prm else args.hf_checkpoint
+    original_model_path = args.prm_model_path if is_prm else (args.rollout_model_path or args.hf_checkpoint)
+    model_path = original_model_path
+    model_path = maybe_prepare_qwen35_text_model(
+        model_path,
+        language_only=getattr(args, "sglang_language_only", False),
+    )
+    server_language_only = getattr(args, "sglang_language_only", False)
+    # Once Qwen3.5 has been materialized as a text-only shadow checkpoint, we should
+    # stop forwarding `language_only` to SGLang. Recent SGLang builds interpret the
+    # flag as encoder disaggregation and require `--encoder-urls`, even though the
+    # shadow checkpoint is already a plain text model.
+    if model_path != original_model_path and is_qwen35_model_path(model_path):
+        server_language_only = False
+    if is_qwen35_model_path(model_path) or is_qwen35_model_path(original_model_path):
+        os.environ["SLIME_ENABLE_QWEN35_SGLANG_PATCH"] = "1"
 
     nnodes = max(1, gpus_per_engine // args.num_gpus_per_node)
     node_rank = rank % nnodes
@@ -545,6 +565,10 @@ def _compute_server_args(
     unused_keys = set(kwargs.keys())
     for attr in dataclasses.fields(ServerArgs):
         if worker_type == "decode" and attr.name == "enable_hierarchical_cache":
+            continue
+        if attr.name == "language_only":
+            kwargs[attr.name] = server_language_only
+            unused_keys.discard(attr.name)
             continue
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:
             kwargs[attr.name] = getattr(args, f"sglang_{attr.name}")

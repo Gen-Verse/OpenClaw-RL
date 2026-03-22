@@ -241,6 +241,15 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--rollout-model-path",
+                type=str,
+                default=None,
+                help=(
+                    "Optional model path used only for SGLang rollout engines. "
+                    "When unset, rollout will use --hf-checkpoint."
+                ),
+            )
+            parser.add_argument(
                 "--rollout-function-path",
                 type=str,
                 default="slime.rollout.sglang_rollout.generate_rollout",

@@ -270,6 +270,11 @@ cd slime
 bash ../openclaw-combine/run_qwen3_4b_openclaw_combine.sh
 ```
 
+**Qwen3.5-4B** (hybrid text backbone):
+```bash
+bash ../openclaw-combine/run_qwen35_4b_openclaw_combine.sh
+```
+
 This method combines binary RL and OPD to achieve the best optimization.
 
 See [`./openclaw-combine/README.md`](./openclaw-combine/README.md) for algorithm details.
@@ -300,6 +305,11 @@ cd slime
 bash ../openclaw-rl/run_qwen3_4b_openclaw_rl.sh
 ```
 
+**Qwen3.5-4B** (hybrid text backbone):
+```bash
+bash ../openclaw-rl/run_qwen35_4b_openclaw_rl.sh
+```
+
 The PRM will automatically judge response quality from next-state feedback. We recommend providing frequent feedback (e.g., 👍/👎) to help the model optimize effectively.
 
 See [`./openclaw-rl/README.md`](./openclaw-rl/README.md) for algorithm details.
@@ -328,6 +338,11 @@ see [`./openclaw-tinker/README.md`](./openclaw-tinker/README.md) for setup detai
 ```bash
 cd slime
 bash ../openclaw-opd/run_qwen3_4b_openclaw_opd.sh
+```
+
+**Qwen3.5-4B** (hybrid text backbone):
+```bash
+bash ../openclaw-opd/run_qwen35_4b_openclaw_opd.sh
 ```
 
 The system extracts hindsight hints from your feedback and distills them into the policy at the token level. We recommend providing concrete feedback (e.g., "you should have checked the file first" or "don't use that library").
@@ -557,6 +572,5 @@ When using OpenClaw-RL, please do not provide sensitive personal information dur
 
 
 ---
-
 
 

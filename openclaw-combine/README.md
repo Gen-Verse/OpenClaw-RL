@@ -43,6 +43,13 @@ cd slime
 bash ../openclaw-combine/run_qwen3_4b_openclaw_combine.sh
 ```
 
+Qwen3.5-4B alternative:
+
+```bash
+cd slime
+bash ../openclaw-combine/run_qwen35_4b_openclaw_combine.sh
+```
+
 ### Key Environment Variables
 
 | Variable | Default | Description |

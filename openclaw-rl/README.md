@@ -45,6 +45,13 @@ cd slime
 bash ../openclaw-rl/run_qwen3_4b_openclaw_rl.sh
 ```
 
+Qwen3.5-4B alternative:
+
+```bash
+cd slime
+bash ../openclaw-rl/run_qwen35_4b_openclaw_rl.sh
+```
+
 
 
 ## File Structure
