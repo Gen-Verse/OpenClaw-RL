@@ -131,7 +131,7 @@ def send_to_openclaw(
             "Content-Type": "application/json",
         },
         json={
-            "model": "default",
+            "model": "openclaw/default",
             "stream": False,
             "user": session_user,
             "messages": [{"role": "user", "content": message}],
