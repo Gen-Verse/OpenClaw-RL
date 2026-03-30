@@ -79,8 +79,14 @@ DONE_SENTINEL = "GRADING_DONE"
 
 def strip_thinking(text: str) -> str:
     """Remove <think>...</think> blocks from model output."""
-    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+    # Normal circumstances：<think> ... </think> answer
+    text = re.sub(r"^<think>[\s\S]*?</think>\s*", "", text)
 
+    # Qwen3-Thinking-2507 Special Circumstances：thinking... </think> answer
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1].lstrip()
+    return text.strip()
+  
 
 def get_env_or_exit(name: str) -> str:
     val = os.environ.get(name, "").strip()
