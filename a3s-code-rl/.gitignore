@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+generated_configs/
+generated_workspaces/
+workspace_template_cache/
+results/
+simulated_user_backends.json

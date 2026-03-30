@@ -1,0 +1,16 @@
+{
+  "template": "mini_taskboard",
+  "repo_summary": "a small Python CLI that stores tasks in a local JSON file and exposes add, list, and done commands",
+  "key_files": [
+    "taskboard/cli.py wires argparse commands and renders CLI output",
+    "taskboard/storage.py loads and saves task data to a JSON file",
+    "tests/test_cli.py covers the current command behavior with pytest",
+    "README.md is the user-facing quick start and example workflow"
+  ],
+  "test_command": "pytest -q",
+  "realism_notes": [
+    "Prefer scoped product or maintenance asks over full rewrites",
+    "Natural requests often mention tests, docs, or command examples",
+    "The repo is intentionally small, so the request should stay practical for a single agent session"
+  ]
+}

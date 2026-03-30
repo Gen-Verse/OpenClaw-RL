@@ -1,0 +1,112 @@
+[
+  {
+    "id": "taskboard-json-list",
+    "template": "mini_taskboard",
+    "seed": "The list command should support --json output so shell scripts can consume it.",
+    "acceptance": [
+      "list --json prints machine-readable output",
+      "plain text list output should keep working",
+      "tests cover the new output mode"
+    ],
+    "tags": ["cli", "serialization", "tests"]
+  },
+  {
+    "id": "taskboard-empty-title",
+    "template": "mini_taskboard",
+    "seed": "Users can add blank or whitespace-only task titles right now; reject those cleanly.",
+    "acceptance": [
+      "empty titles are rejected with a clear message",
+      "existing add flow still works for valid titles",
+      "tests cover the validation"
+    ],
+    "tags": ["validation", "ux", "tests"]
+  },
+  {
+    "id": "taskboard-stats-command",
+    "template": "mini_taskboard",
+    "seed": "We need a small stats command that reports total, open, and done task counts.",
+    "acceptance": [
+      "new stats command exists",
+      "output is easy to read from the CLI",
+      "tests verify mixed task states"
+    ],
+    "tags": ["feature", "cli", "reporting", "advanced"]
+  },
+  {
+    "id": "taskboard-list-filter",
+    "template": "mini_taskboard",
+    "seed": "Add a way to filter list output by status because done items are getting noisy.",
+    "acceptance": [
+      "list supports filtering open vs done tasks",
+      "unfiltered list still shows everything",
+      "tests cover both modes"
+    ],
+    "tags": ["feature", "cli", "filtering"]
+  },
+  {
+    "id": "taskboard-prefix-done",
+    "template": "mini_taskboard",
+    "seed": "The done command is too strict; allow id prefixes or a friendlier lookup flow.",
+    "acceptance": [
+      "done is easier to use without breaking exact ids",
+      "ambiguous matches fail clearly",
+      "tests cover success and failure cases"
+    ],
+    "tags": ["ux", "cli", "lookup", "advanced"]
+  },
+  {
+    "id": "taskboard-readme-refresh",
+    "template": "mini_taskboard",
+    "seed": "Refresh the README examples so they reflect the current commands and one realistic workflow.",
+    "acceptance": [
+      "README has a short start-to-finish example",
+      "examples match real CLI behavior",
+      "docs stay concise"
+    ],
+    "tags": ["docs", "readme"]
+  },
+  {
+    "id": "taskboard-limit-output",
+    "template": "mini_taskboard",
+    "seed": "Large task lists are noisy; support a --limit flag on list.",
+    "acceptance": [
+      "list accepts --limit",
+      "limit behavior is deterministic",
+      "tests cover small and large values"
+    ],
+    "tags": ["feature", "cli", "pagination"]
+  },
+  {
+    "id": "taskboard-sort-open-first",
+    "template": "mini_taskboard",
+    "seed": "When people review the board they want open tasks first and done tasks later.",
+    "acceptance": [
+      "list output sorts open before done",
+      "ordering stays stable enough to follow",
+      "tests cover the sort behavior"
+    ],
+    "tags": ["sorting", "ux", "tests"]
+  },
+  {
+    "id": "taskboard-rename-command",
+    "template": "mini_taskboard",
+    "seed": "We need a lightweight rename command so people can fix task titles without editing the JSON file by hand.",
+    "acceptance": [
+      "rename command updates a task title by id",
+      "missing ids fail clearly",
+      "tests cover the command"
+    ],
+    "tags": ["feature", "cli", "edit", "advanced"]
+  },
+  {
+    "id": "taskboard-docs-after-json",
+    "template": "mini_taskboard",
+    "seed": "If CLI output changes, make sure the docs include one example for automation scripts.",
+    "acceptance": [
+      "README mentions script-friendly usage",
+      "example is consistent with real output",
+      "change is small and focused"
+    ],
+    "tags": ["docs", "automation"]
+  }
+]
