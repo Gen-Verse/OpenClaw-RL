@@ -69,6 +69,11 @@ def parse_args() -> TinkerConfig:
     parser.add_argument("--served-model-name", default=os.getenv("SERVED_MODEL_NAME", "qwen3-4b"))
     parser.add_argument("--api-key", default=os.getenv("SGLANG_API_KEY", ""))
 
+    # Context
+    parser.add_argument("--max-context-tokens", type=int,
+                        default=int(os.getenv("MAX_CONTEXT_TOKENS", "20000")),
+                        help="Max tokens per training datum (truncates prompt from left)")
+
     # Logging
     parser.add_argument("--record-dir", default=os.getenv("RECORD_DIR", "records/"))
     parser.add_argument("--wandb-project", default=os.getenv("WANDB_PROJECT", "openclaw-tinker"))
@@ -98,6 +103,7 @@ def parse_args() -> TinkerConfig:
         proxy_port=args.proxy_port,
         served_model_name=args.served_model_name,
         api_key=args.api_key,
+        max_context_tokens=args.max_context_tokens,
         record_dir=args.record_dir,
         wandb_project=args.wandb_project,
     )
