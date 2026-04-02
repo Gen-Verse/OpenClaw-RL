@@ -57,6 +57,8 @@ class _CapturingTokenizer:
         self.decoded_text = decoded_text
         self.last_template_messages = None
         self.last_template_tools = None
+        self.last_template_enable_thinking = None
+        self.last_template_tool_choice = None
 
     def encode(self, text: str, add_special_tokens=False):
         del add_special_tokens
@@ -66,9 +68,19 @@ class _CapturingTokenizer:
         del tokens, skip_special_tokens
         return self.decoded_text
 
-    def apply_chat_template(self, messages, tools=None, tokenize=False, add_generation_prompt=False):
+    def apply_chat_template(
+        self,
+        messages,
+        tools=None,
+        tokenize=False,
+        add_generation_prompt=False,
+        enable_thinking=None,
+        tool_choice=None,
+    ):
         self.last_template_messages = messages
         self.last_template_tools = tools
+        self.last_template_enable_thinking = enable_thinking
+        self.last_template_tool_choice = tool_choice
         del tokenize, add_generation_prompt
         return "\n".join(f"{m['role']}: {m.get('content', '')}" for m in messages)
 
@@ -232,3 +244,50 @@ def test_streaming_qwen35_tool_call_only_emits_tool_call_delta(tmp_path):
     assert first_delta["tool_calls"][0]["function"]["name"] == "get_weather"
     assert payloads[-1]["choices"][0]["finish_reason"] == "tool_calls"
     assert events[-1] == "[DONE]"
+
+
+def test_reasoning_is_returned_separately_from_visible_content(tmp_path):
+    _server, client, tokenizer = _make_client(
+        tmp_path,
+        "<think>private chain of thought</think>\nack",
+    )
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen3.5-local",
+            "messages": [{"role": "user", "content": "Reply with exactly ack."}],
+            "max_tokens": 16,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    message = payload["choices"][0]["message"]
+    assert tokenizer.last_template_enable_thinking is True
+    assert message["content"] == "ack"
+    assert message["reasoning_content"] == "private chain of thought"
+
+
+def test_enable_thinking_false_is_forwarded_and_suppresses_reasoning_field(tmp_path):
+    _server, client, tokenizer = _make_client(
+        tmp_path,
+        "ack",
+    )
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "qwen3.5-local",
+            "messages": [{"role": "user", "content": "Reply with exactly ack."}],
+            "max_tokens": 16,
+            "extra_body": {"enable_thinking": False},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    message = payload["choices"][0]["message"]
+    assert tokenizer.last_template_enable_thinking is False
+    assert message["content"] == "ack"
+    assert "reasoning_content" not in message

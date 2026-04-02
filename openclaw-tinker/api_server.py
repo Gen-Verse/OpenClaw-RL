@@ -124,6 +124,42 @@ _KIMI_TOOL_CALL_SECTION_RE = re.compile(
 )
 
 
+def _resolve_enable_thinking(body: dict[str, Any]) -> bool:
+    enable_thinking = True
+    extra_body = body.get("extra_body")
+    if isinstance(extra_body, dict):
+        chat_template_kwargs = extra_body.get("chat_template_kwargs")
+        if isinstance(chat_template_kwargs, dict) and "enable_thinking" in chat_template_kwargs:
+            return bool(chat_template_kwargs["enable_thinking"])
+        if "enable_thinking" in extra_body:
+            return bool(extra_body["enable_thinking"])
+    chat_template_kwargs = body.get("chat_template_kwargs")
+    if isinstance(chat_template_kwargs, dict) and "enable_thinking" in chat_template_kwargs:
+        return bool(chat_template_kwargs["enable_thinking"])
+    if "enable_thinking" in body:
+        return bool(body["enable_thinking"])
+    return enable_thinking
+
+
+def _apply_chat_template_with_fallbacks(tokenizer, messages: list[dict], *, enable_thinking: bool, tools=None, tool_choice=None) -> str:
+    optional_items: list[tuple[str, Any]] = [("enable_thinking", enable_thinking)]
+    if tools:
+        optional_items.append(("tools", tools))
+    if tool_choice is not None and tools:
+        optional_items.append(("tool_choice", tool_choice))
+
+    current_items = list(optional_items)
+    while True:
+        kwargs = {"tokenize": False, "add_generation_prompt": True}
+        kwargs.update({key: value for key, value in current_items})
+        try:
+            return tokenizer.apply_chat_template(messages, **kwargs)
+        except TypeError:
+            if not current_items:
+                raise
+            current_items.pop()
+
+
 def _stringify_json_arguments(arguments_text: str) -> str:
     try:
         return json.dumps(json.loads(arguments_text), ensure_ascii=False)
@@ -151,6 +187,27 @@ def _remove_spans(text: str, spans: list[tuple[int, int]]) -> str:
 def _strip_thinking(text: str) -> str:
     stripped = _THINK_RE.sub("", text)
     return stripped.replace("<think>", "").replace("</think>", "").strip()
+
+
+def _split_thinking(text: str) -> tuple[str | None, str]:
+    stripped = text.lstrip()
+
+    full_block_match = re.match(r"^<think>\s*(.*?)\s*</think>\s*(.*)$", stripped, flags=re.DOTALL)
+    if full_block_match:
+        reasoning = full_block_match.group(1).strip() or None
+        return reasoning, full_block_match.group(2).strip()
+
+    truncated_block_match = re.match(r"^<think>\s*(.*)$", stripped, flags=re.DOTALL)
+    if truncated_block_match:
+        reasoning = truncated_block_match.group(1).strip() or None
+        return reasoning, ""
+
+    orphan_close_match = re.match(r"^(.*?)</think>\s*(.*)$", stripped, flags=re.DOTALL)
+    if orphan_close_match:
+        reasoning = orphan_close_match.group(1).replace("<think>", "").strip() or None
+        return reasoning, orphan_close_match.group(2).strip()
+
+    return None, text
 
 
 def _extract_tool_calls(text: str) -> tuple[str, list[dict]]:
@@ -321,12 +378,17 @@ class _BaseServer:
         tool_choice = body.get("tool_choice")
         parse_tool_calls = tools is not None and tool_choice != "none"
         template_tools = tools if parse_tool_calls else None
+        enable_thinking = _resolve_enable_thinking(body)
         temperature = float(body.get("temperature", 0.6))
         max_tokens = int(body.get("max_tokens") or 2048)
         stop = body.get("stop")
 
-        prompt_text = self._tokenizer.apply_chat_template(
-            norm_msgs, tools=template_tools, tokenize=False, add_generation_prompt=True,
+        prompt_text = _apply_chat_template_with_fallbacks(
+            self._tokenizer,
+            norm_msgs,
+            enable_thinking=enable_thinking,
+            tools=template_tools,
+            tool_choice=tool_choice if parse_tool_calls else None,
         )
         prompt_ids = self._tokenizer.encode(prompt_text, add_special_tokens=False)
 
@@ -348,16 +410,21 @@ class _BaseServer:
         raw_response_logprobs = [float(lp) for lp in (seq.logprobs or [])]
 
         response_text = self._tokenizer.decode(seq.tokens, skip_special_tokens=True)
+        reasoning_content, visible_text = _split_thinking(response_text)
+        if not enable_thinking:
+            reasoning_content = None
         if parse_tool_calls:
-            normalized_text, parsed_tool_calls = _extract_tool_calls(response_text)
+            normalized_text, parsed_tool_calls = _extract_tool_calls(visible_text)
         else:
-            normalized_text, parsed_tool_calls = response_text, []
+            normalized_text, parsed_tool_calls = visible_text, []
 
         lp_content = [{"token": "", "logprob": lp, "top_logprobs": []} for lp in raw_response_logprobs]
         assistant_message: dict[str, Any] = {
             "role": "assistant",
             "content": normalized_text if (normalized_text or not parsed_tool_calls) else None,
         }
+        if reasoning_content is not None:
+            assistant_message["reasoning_content"] = reasoning_content
         if parsed_tool_calls:
             assistant_message["tool_calls"] = parsed_tool_calls
 
