@@ -1,4 +1,5 @@
 import inspect
+import os
 import re
 from argparse import Namespace
 from collections.abc import Iterator, Sequence
@@ -10,6 +11,40 @@ from megatron.core.transformer.transformer_layer import get_transformer_layer_of
 
 from slime.backends.megatron_utils.misc_utils import strip_param_name_prefix
 from slime.utils.types import ParamInfo
+
+_DISABLE_LINEAR_FC1_RECHUNK = os.getenv("SLIME_QWEN35_DISABLE_LINEAR_FC1_RECHUNK", "0") == "1"
+
+
+def _merge_tp_partitions(
+    name: str,
+    param_partitions: list[torch.Tensor],
+    partition_dim: int,
+    partition_stride: int,
+) -> torch.Tensor:
+    if partition_stride > 1:
+        local_partition_size = param_partitions[0].size(partition_dim)
+        assert (
+            local_partition_size % partition_stride == 0
+        ), f"{name} has local size {local_partition_size} not divisible by partition_stride={partition_stride}"
+        per_partition_per_stride_size = local_partition_size // partition_stride
+        split_param_partitions = [
+            torch.split(partition, per_partition_per_stride_size, dim=partition_dim) for partition in param_partitions
+        ]
+        param_partitions = [
+            split_param_partitions[rank][stride_idx]
+            for stride_idx in range(partition_stride)
+            for rank in range(len(split_param_partitions))
+        ]
+
+    # TODO: here we did an extra copy during concat, maybe merge this with convert_to_hf is better?
+    # TODO: check only GLU is used.
+    if "linear_fc1.weight" in name and not _DISABLE_LINEAR_FC1_RECHUNK:
+        param_partitions = [p.chunk(2, dim=0) for p in param_partitions]
+        param_partitions = [p[0] for p in param_partitions] + [p[1] for p in param_partitions]
+    # this is bug in megatron's grouped moe.
+    if "linear_fc2.weight" in name and partition_dim == 0:
+        partition_dim = 1
+    return torch.cat(param_partitions, dim=partition_dim)
 
 
 def all_gather_param(name: str, param: torch.nn.Parameter) -> torch.Tensor:
@@ -34,18 +69,8 @@ def all_gather_param(name: str, param: torch.nn.Parameter) -> torch.Tensor:
     param_partitions = [torch.empty_like(param.data) for _ in range(tp_size)]
     dist.all_gather(param_partitions, param.data, group=tp_group)
     partition_dim = param.partition_dim
-    assert param.partition_stride == 1, "partition_stride != 1 is not supported"
-    # TODO: here we did an extra copy during concat, maybe merge this with convert_to_hf is better?
-    # TODO: check only GLU is used.
-    if "linear_fc1.weight" in name:
-        param_partitions = [p.chunk(2, dim=0) for p in param_partitions]
-        param_partitions = [p[0] for p in param_partitions] + [p[1] for p in param_partitions]
-    # this is bug in megatron's grouped moe.
-    if "linear_fc2.weight" in name:
-        if partition_dim == 0:
-            partition_dim = 1
-    param = torch.cat(param_partitions, dim=partition_dim)
-    return param
+    partition_stride = getattr(param, "partition_stride", 1)
+    return _merge_tp_partitions(name, param_partitions, partition_dim, partition_stride)
 
 
 def all_gather_params_async(
@@ -63,10 +88,10 @@ def all_gather_params_async(
     for info, param in param_infos_and_params:
         # Prepare async all_gather
         if "expert_bias" in info.name:
-            gather_tasks.append((info, param, None, None, None))
+            gather_tasks.append((info, param, None, None, None, None))
             handles.append(None)
         elif not param.tensor_model_parallel or getattr(param, "parallel_mode", None) == "duplicated":
-            gather_tasks.append((info, param.data, None, None, None))
+            gather_tasks.append((info, param.data, None, None, None, None))
             handles.append(None)
         else:
             # Start async all_gather
@@ -79,7 +104,9 @@ def all_gather_params_async(
 
             param_partitions = [torch.empty_like(param.data) for _ in range(tp_size)]
             handle = dist.all_gather(param_partitions, param.data, group=tp_group, async_op=True)
-            gather_tasks.append((info, None, handle, param_partitions, param.partition_dim))
+            gather_tasks.append(
+                (info, None, handle, param_partitions, param.partition_dim, getattr(param, "partition_stride", 1))
+            )
             handles.append(handle)
 
     # Phase 2: Wait for ALL async operations to complete at once
@@ -90,23 +117,12 @@ def all_gather_params_async(
 
     # Phase 3: Process all results after all communications are done
     gathered_params = []
-    for info, direct_param, handle, param_partitions, partition_dim in gather_tasks:
+    for info, direct_param, handle, param_partitions, partition_dim, partition_stride in gather_tasks:
         if handle is None:
             # No all_gather needed
             param = direct_param
         else:
-            # Process the gathered partitions (same logic as original all_gather_param)
-            assert partition_dim is not None, "partition_stride != 1 is not supported"
-            # TODO: here we did an extra copy during concat, maybe merge this with convert_to_hf is better?
-            # TODO: check only GLU is used.
-            if "linear_fc1.weight" in info.name:
-                param_partitions = [p.chunk(2, dim=0) for p in param_partitions]
-                param_partitions = [p[0] for p in param_partitions] + [p[1] for p in param_partitions]
-            # this is bug in megatron's grouped moe.
-            if "linear_fc2.weight" in info.name:
-                if partition_dim == 0:
-                    partition_dim = 1
-            param = torch.cat(param_partitions, dim=partition_dim)
+            param = _merge_tp_partitions(info.name, param_partitions, partition_dim, partition_stride)
 
         gathered_params.append(param)
 

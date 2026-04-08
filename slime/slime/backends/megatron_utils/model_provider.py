@@ -81,12 +81,19 @@ def get_model_provider_func(
         return wrapped_model_provider
 
     if args.megatron_to_hf_mode == "bridge":
-        from megatron.bridge import AutoBridge
-
-        import slime_plugins.megatron_bridge  # noqa: F401  # register custom bridges
-
-        bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
-        provider = bridge.to_megatron_provider(load_weights=False)
+        bridge, hf_pretrained, is_local_bridge = load_function(
+            "slime.utils.megatron_bridge_utils.build_bridge_for_hf_checkpoint"
+        )(args.hf_checkpoint, load_weights=False)
+        if is_local_bridge:
+            provider = bridge.provider_bridge(hf_pretrained)
+        else:
+            provider = bridge.to_megatron_provider(load_weights=False)
+        print(
+            "Qwen35 bridge debug: "
+            f"bridge={type(bridge).__module__}.{type(bridge).__name__} "
+            f"provider={type(provider).__module__}.{type(provider).__name__} "
+            f"is_local_bridge={is_local_bridge}"
+        )
         # TODO: we should not manually set this...
         provider.tensor_model_parallel_size = args.tensor_model_parallel_size
         provider.pipeline_model_parallel_size = args.pipeline_model_parallel_size
@@ -211,12 +218,22 @@ def get_model_provider_func(
 
 
 def wrap_model_provider_with_freeze(original_provider, args):
-    def wrapped_provider(pre_process=True, post_process=True, vp_stage=None):
+    def wrapped_provider(pre_process=True, post_process=True, vp_stage=None, **extra_kwargs):
         sig = inspect.signature(original_provider)
+        provider_kwargs = {
+            "pre_process": pre_process,
+            "post_process": post_process,
+        }
         if "vp_stage" in sig.parameters:
-            model = original_provider(pre_process=pre_process, post_process=post_process, vp_stage=vp_stage)
-        else:
-            model = original_provider(pre_process=pre_process, post_process=post_process)
+            provider_kwargs["vp_stage"] = vp_stage
+
+        # Newer Megatron-LM may pass extra provider kwargs such as config.
+        # Forward only the kwargs the wrapped provider actually declares.
+        for name, value in extra_kwargs.items():
+            if name in sig.parameters:
+                provider_kwargs[name] = value
+
+        model = original_provider(**provider_kwargs)
 
         freeze_model_params(model, args)
 

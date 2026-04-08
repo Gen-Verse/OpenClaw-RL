@@ -10,6 +10,10 @@ from megatron.training.global_vars import get_args
 
 from slime.utils import megatron_bridge_utils
 
+
+def _should_log_qwen35_bridge_debug() -> bool:
+    return os.getenv("SLIME_DEBUG_QWEN35_BRIDGE", "").lower() in {"1", "true", "yes", "on"}
+
 try:
     # Here we patch out the `validate_non_overlapping_shards_metadata` in both functions
     # because it is really slow for large models with many shards.
@@ -128,15 +132,29 @@ def _is_megatron_checkpoint(path: str | Path) -> bool:
 
 def _load_checkpoint_hf(ddp_model, optimizer, args, load_path: str):
     assert args.megatron_to_hf_mode == "bridge", "Only bridge mode is supported for loading HF checkpoint"
-    from megatron.bridge import AutoBridge
-
-    import slime_plugins.megatron_bridge  # noqa: F401
 
     logger.info(f"Load checkpoint from HuggingFace model into Megatron (path={load_path})")
 
     with megatron_bridge_utils.patch_megatron_model(ddp_model):
-        bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
-        bridge.load_hf_weights(ddp_model)
+        bridge, hf_pretrained, is_local_bridge = megatron_bridge_utils.build_bridge_for_hf_checkpoint(
+            args.hf_checkpoint,
+            load_weights=True,
+        )
+        if _should_log_qwen35_bridge_debug():
+            logger.info(
+                "Qwen35 bridge debug checkpoint: bridge=%s provider_mode=%s is_local_bridge=%s",
+                f"{type(bridge).__module__}.{type(bridge).__name__}",
+                "load_weights_hf_to_megatron" if is_local_bridge else "load_hf_weights",
+                is_local_bridge,
+        )
+        if is_local_bridge:
+            dump_path = megatron_bridge_utils.maybe_dump_bridge_runtime_layout(bridge, ddp_model)
+            if dump_path:
+                logger.info("Qwen35 bridge debug checkpoint: dumped runtime layout to %s", dump_path)
+        if is_local_bridge:
+            bridge.load_weights_hf_to_megatron(hf_pretrained, ddp_model)
+        else:
+            bridge.load_hf_weights(ddp_model)
 
     # Copied from Megatron-core :: load_checkpoint (with simplifications)
     if (args.fp16 or args.bf16) and optimizer is not None:

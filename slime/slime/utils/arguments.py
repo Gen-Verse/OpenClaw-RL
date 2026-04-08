@@ -1889,6 +1889,17 @@ def hf_validate_args(args, hf_config):
     def equal(x, y):
         return x == y
 
+    def get_arg_value(name):
+        # Newer Megatron-Core renamed some argparse destinations while keeping
+        # the same CLI flags. Accept both spellings here.
+        alias_map = {
+            "norm_epsilon": ("norm_epsilon", "layernorm_epsilon"),
+        }
+        for candidate in alias_map.get(name, (name,)):
+            if hasattr(args, candidate):
+                return getattr(args, candidate)
+        raise AttributeError(f"'Namespace' object has no attribute '{name}'")
+
     errors = []
 
     # multimodal models have different config structure
@@ -1916,10 +1927,11 @@ def hf_validate_args(args, hf_config):
             hf_value = getattr(hf_config, hf_config_name)
 
         if hf_value is not None:
-            if not compare_fn(hf_value, getattr(args, megatron_config_name)):
+            arg_value = get_arg_value(megatron_config_name)
+            if not compare_fn(hf_value, arg_value):
                 errors.append(
                     f"{hf_config_name} in hf config {hf_value} is not equal to "
-                    f"{megatron_config_name} {getattr(args, megatron_config_name)}, please check the config."
+                    f"{megatron_config_name} {arg_value}, please check the config."
                 )
 
     if len(errors) > 0:
