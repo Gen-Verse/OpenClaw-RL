@@ -354,6 +354,7 @@ class Qwen35VLGPTModel(GPTModel):
         *,
         inference_params: Optional[BaseInferenceContext] = None,
         loss_mask: Optional[Tensor] = None,
+        mtp_kwargs: Optional[dict] = None,
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
     ) -> Tensor:
@@ -399,6 +400,7 @@ class Qwen35VLGPTModel(GPTModel):
             packed_seq_params=packed_seq_params,
             sequence_len_offset=sequence_len_offset,
             runtime_gather_output=runtime_gather_output,
+            mtp_kwargs=mtp_kwargs,
             extra_block_kwargs=extra_block_kwargs,
             inference_context=inference_context,
         )
@@ -436,6 +438,78 @@ class Qwen35VLGPTModel(GPTModel):
                     )
 
         return outputs
+
+    def _postprocess(
+        self,
+        hidden_states,
+        input_ids,
+        position_ids,
+        labels,
+        rotary_pos_emb,
+        rotary_pos_cos,
+        rotary_pos_sin,
+        mtp_in_postprocess=None,
+        loss_mask=None,
+        decoder_input=None,
+        attention_mask=None,
+        inference_params=None,
+        packed_seq_params=None,
+        sequence_len_offset=None,
+        runtime_gather_output=None,
+        mtp_kwargs=None,
+        extra_block_kwargs=None,
+        inference_context=None,
+        is_spec_decode=None,
+    ):
+        mtp_labels = None if mtp_kwargs is None else mtp_kwargs.get("mtp_labels", None)
+        should_skip_mtp_loss = labels is None and mtp_labels is None and self.config.mtp_num_layers
+        if not should_skip_mtp_loss:
+            return super()._postprocess(
+                hidden_states=hidden_states,
+                input_ids=input_ids,
+                position_ids=position_ids,
+                labels=labels,
+                rotary_pos_emb=rotary_pos_emb,
+                rotary_pos_cos=rotary_pos_cos,
+                rotary_pos_sin=rotary_pos_sin,
+                mtp_in_postprocess=mtp_in_postprocess,
+                loss_mask=loss_mask,
+                decoder_input=decoder_input,
+                attention_mask=attention_mask,
+                inference_params=inference_params,
+                packed_seq_params=packed_seq_params,
+                sequence_len_offset=sequence_len_offset,
+                runtime_gather_output=runtime_gather_output,
+                extra_block_kwargs=extra_block_kwargs,
+                inference_context=inference_context,
+                is_spec_decode=is_spec_decode,
+            )
+
+        original_mtp_num_layers = self.config.mtp_num_layers
+        try:
+            self.config.mtp_num_layers = None
+            return super()._postprocess(
+                hidden_states=hidden_states,
+                input_ids=input_ids,
+                position_ids=position_ids,
+                labels=labels,
+                rotary_pos_emb=rotary_pos_emb,
+                rotary_pos_cos=rotary_pos_cos,
+                rotary_pos_sin=rotary_pos_sin,
+                mtp_in_postprocess=mtp_in_postprocess,
+                loss_mask=loss_mask,
+                decoder_input=decoder_input,
+                attention_mask=attention_mask,
+                inference_params=inference_params,
+                packed_seq_params=packed_seq_params,
+                sequence_len_offset=sequence_len_offset,
+                runtime_gather_output=runtime_gather_output,
+                extra_block_kwargs=extra_block_kwargs,
+                inference_context=inference_context,
+                is_spec_decode=is_spec_decode,
+            )
+        finally:
+            self.config.mtp_num_layers = original_mtp_num_layers
 
 
 def get_qwen35_rope_index(
@@ -656,6 +730,7 @@ class Qwen35VLModel(MegatronModule):
         video_grid_thw: torch.Tensor = None,
         image_input_mask: torch.Tensor = None,
         mm_token_type_ids: torch.Tensor = None,
+        mtp_kwargs: Optional[dict] = None,
     ) -> torch.Tensor:
         assert pixel_values_videos is None and video_grid_thw is None, "Qwen3.5 local bridge does not support video"
         assert inference_params is None, "Qwen3.5 local bridge does not support inference"
@@ -760,6 +835,7 @@ class Qwen35VLModel(MegatronModule):
             decoder_input=combined_embeddings,
             packed_seq_params=packed_seq_params,
             loss_mask=loss_mask,
+            mtp_kwargs=mtp_kwargs,
             extra_block_kwargs=extra_block_kwargs,
             visual_pos_masks=None,
             deepstack_visual_embeds=None,

@@ -14,23 +14,15 @@ set -ex
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 SLIME_DIR="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
 
-OFFICIAL_MBRIDGE_ROOT=${OFFICIAL_MBRIDGE_ROOT:-}
+OFFICIAL_MBRIDGE_ROOT=${OFFICIAL_MBRIDGE_ROOT:-"/data_storage/wyj/OpenClaw-RL/Megatron-Bridge-qwen35"}
 OFFICIAL_MBRIDGE_SRC="${OFFICIAL_MBRIDGE_ROOT}/src"
 MEGATRON_LM_PATH=${MEGATRON_LM_PATH:-"${OFFICIAL_MBRIDGE_ROOT}/3rdparty/Megatron-LM"}
 
+HF_CKPT=${HF_CKPT:-"/data_storage/wyj/systems/huggingface/hub/Qwen35-4B"}
 MODEL_ARGS_ROTARY_BASE=10000000 source "${SLIME_DIR}/scripts/models/qwen3.5-4B-VL.sh"
 
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
-
-NVIDIA_BIN_DIR=${NVIDIA_BIN_DIR:-/usr/local/nvidia/bin}
-NVIDIA_LIB_DIR=${NVIDIA_LIB_DIR:-/usr/local/nvidia/lib64}
-if [[ -d "${NVIDIA_BIN_DIR}" ]]; then
-  export PATH="${NVIDIA_BIN_DIR}:${PATH}"
-fi
-if [[ -d "${NVIDIA_LIB_DIR}" ]]; then
-  export LD_LIBRARY_PATH="${NVIDIA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
-fi
 
 export RAY_health_check_failure_threshold=${RAY_health_check_failure_threshold:-20}
 export RAY_health_check_period_ms=${RAY_health_check_period_ms:-5000}
@@ -40,19 +32,18 @@ export RAY_num_heartbeats_timeout=${RAY_num_heartbeats_timeout:-60}
 NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
 ROLLOUT_GPUS=${ROLLOUT_GPUS:-4}
-ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-4}
-ROLLOUT_NUM_GPUS_PER_ENGINE=${ROLLOUT_NUM_GPUS_PER_ENGINE:-1}
 
 if (( ACTOR_GPUS + ROLLOUT_GPUS > NUM_GPUS )); then
   echo "ACTOR_GPUS + ROLLOUT_GPUS must be <= NUM_GPUS"
+  echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, NUM_GPUS=${NUM_GPUS}"
   exit 1
 fi
 
 export GUI_ENV_SERVER_HOST=${GUI_ENV_SERVER_HOST:-127.0.0.1}
 export GUI_ENV_SERVER_PORT=${GUI_ENV_SERVER_PORT:-18080}
 export GUI_ENV_SERVER_URL=${GUI_ENV_SERVER_URL:-"http://${GUI_ENV_SERVER_HOST}:${GUI_ENV_SERVER_PORT}"}
-export GUI_ENV_SERVER_MAX_ENVS=${GUI_ENV_SERVER_MAX_ENVS:-32}
-export GUI_PREWARM_CONCURRENCY=${GUI_PREWARM_CONCURRENCY:-32}
+export GUI_ENV_SERVER_MAX_ENVS=${GUI_ENV_SERVER_MAX_ENVS:-64}
+export GUI_PREWARM_CONCURRENCY=${GUI_PREWARM_CONCURRENCY:-64}
 export GUI_POOL_MAX_ENVS=${GUI_POOL_MAX_ENVS:-${GUI_ENV_SERVER_MAX_ENVS}}
 export GUI_PREWARM_ENVS=${GUI_PREWARM_ENVS:-${GUI_POOL_MAX_ENVS}}
 export GUI_FORCE_PREWARM_ALL=${GUI_FORCE_PREWARM_ALL:-1}
@@ -67,7 +58,7 @@ export GUI_PATH_TO_VM=${GUI_PATH_TO_VM:-""}
 export GUI_ACTION_SPACE=${GUI_ACTION_SPACE:-pyautogui}
 export GUI_OBSERVATION_TYPE=${GUI_OBSERVATION_TYPE:-screenshot}
 export GUI_COORDINATE_TYPE=${GUI_COORDINATE_TYPE:-relative}
-export GUI_AGENT_CLASS_PATH=${GUI_AGENT_CLASS_PATH:-agents.qwen35_agent.Qwen35AgentLocal}
+export GUI_AGENT_CLASS_PATH=${GUI_AGENT_CLASS_PATH:-"agents.qwen35_agent.Qwen35VLAgentLocal"}
 export GUI_REUSE_VM_ON_RESET=${GUI_REUSE_VM_ON_RESET:-0}
 export GUI_RESET_ON_CLOSE=${GUI_RESET_ON_CLOSE:-1}
 export GUI_CLIENT_PASSWORD=${GUI_CLIENT_PASSWORD:-WWbbb8b7b6314}
@@ -81,7 +72,7 @@ export GUI_RESULT_DIR=${GUI_RESULT_DIR:-"${SCRIPT_DIR}/results"}
 export GUI_RESULT_DIR="${GUI_RESULT_DIR}/${GUI_PROJECT_NAME}"
 export GUI_TEST_CONFIG_BASE_DIR=${GUI_TEST_CONFIG_BASE_DIR:-"${SCRIPT_DIR}/evaluation_examples"}
 export GUI_TRAIN_META_PATH=${GUI_TRAIN_META_PATH:-"${GUI_TEST_CONFIG_BASE_DIR}/train_nochrome.json"}
-export GUI_EVAL_META_PATH=${GUI_EVAL_META_PATH:-"${GUI_TEST_CONFIG_BASE_DIR}/test_multinode.json"}
+export GUI_EVAL_META_PATH=${GUI_EVAL_META_PATH:-"${GUI_TEST_CONFIG_BASE_DIR}/test_nochrome.json"}
 MULTIMODAL_KEYS=${MULTIMODAL_KEYS:-'{"image":"images"}'}
 
 if [[ -n "${GUI_RESULT_DIR}" && "${GUI_RESULT_DIR}" != "/" ]]; then
@@ -100,6 +91,15 @@ export VOLCENGINE_DELINST_MIN_INTERVAL=${VOLCENGINE_DELINST_MIN_INTERVAL:-0.1}
 export VOLCENGINE_INSTANCE_TYPE=${VOLCENGINE_INSTANCE_TYPE:-"ecs.e-c1m2.large,ecs.e-c1m4.large,ecs.e-c1m8.large,ecs.e-c1m1.large,ecs.c3al.large,ecs.c3a.large,ecs.c3il.large,ecs.g3il.large,ecs.r3il.large,ecs.c3a.large,ecs.g3a.large,ecs.r3a.large,ecs.c3i.large,ecs.g3i.large,ecs.r3i.large,ecs.g3al.large,ecs.r3al.large,ecs.r1ie.large,ecs.g1ie.large,ecs.c1ie.large,ecs.g3ine.large"}
 export download_proxy=${download_proxy:-}
 
+if [[ -z "${VOLCENGINE_ACCESS_KEY_ID:-}" ]]; then
+  echo "VOLCENGINE_ACCESS_KEY_ID must be set before starting GUI RL."
+  exit 1
+fi
+if [[ -z "${VOLCENGINE_SECRET_ACCESS_KEY:-}" ]]; then
+  echo "VOLCENGINE_SECRET_ACCESS_KEY must be set before starting GUI RL."
+  exit 1
+fi
+
 if [[ -z "${OFFICIAL_MBRIDGE_ROOT}" ]]; then
   echo "Set OFFICIAL_MBRIDGE_ROOT to your Megatron-Bridge-qwen35 checkout"
   exit 1
@@ -113,7 +113,7 @@ if [[ ! -d "${MEGATRON_LM_PATH}" ]]; then
   exit 1
 fi
 
-HF_CKPT=${HF_CKPT:-}
+
 if [[ -z "${HF_CKPT}" ]]; then
   echo "Set HF_CKPT to your Qwen3.5-4B checkpoint path"
   exit 1
@@ -129,6 +129,7 @@ CKPT_ARGS=(
   --ref-load "${REF_LOAD}"
   --save "${SAVE_CKPT:-${SCRIPT_DIR}/../ckpt/gui-qwen35-4b-rl}"
   --save-interval 20
+  --async-strategy mcore
 )
 
 ENABLE_RESUME_LOAD=${ENABLE_RESUME_LOAD:-0}
@@ -137,32 +138,42 @@ if [[ "${ENABLE_RESUME_LOAD}" == "1" ]]; then
   CKPT_ARGS+=(--load "${RESUME_LOAD}")
 fi
 
+ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-8}
 N_SAMPLES_PER_PROMPT=${N_SAMPLES_PER_PROMPT:-8}
 
 ROLLOUT_ARGS=(
   --data-source-path gui_data_source.GuiMetaDataSource
   --reward-key score
   --num-rollout 1000
-  --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
-  --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"
-  --rollout-max-response-len 512
+  --rollout-batch-size ${ROLLOUT_BATCH_SIZE}
+  --n-samples-per-prompt ${N_SAMPLES_PER_PROMPT}
+  --rollout-max-response-len 1024
   --rollout-temperature 1.0
   --gui-max-steps 30
   --gui-wait-after-reset 60
-  --gui-sleep-after-execution 0.0
+  --gui-sleep-after-execution 0.5
   --gui-max-image-history-length 3
-  --gui-max-reward-image-history-length 2
+  --gui-max-reward-image-history-length 1
   --num-steps-per-rollout 2
 )
+
+ROLLOUT_NUM_GPUS_PER_ENGINE=${ROLLOUT_NUM_GPUS_PER_ENGINE:-1}
+
+IN_FLIGHT_SAMPLES_ESTIMATE=$(( ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT ))
+echo "Configured rollout-batch-size x n-samples-per-prompt = ${IN_FLIGHT_SAMPLES_ESTIMATE}"
+echo "GUI_TRAJECTORY_CONCURRENCY=${GUI_TRAJECTORY_CONCURRENCY} (independent from sglang concurrency)"
 
 EVAL_ARGS=(
   --eval-temperature 0.0
   --gui-eval-max-steps 30
-  --gui-eval-sleep-after-execution 0.0
+  --gui-eval-sleep-after-execution 5.0
   --gui-eval-wait-after-reset 60
   --n-samples-per-eval-prompt 1
+  --eval-interval 20
+  --eval-reward-key acc
+  --eval-function-path generate_with_gui.gui_generate_rollout
 )
-if [[ -n "${GUI_EVAL_INTERVAL:-}" ]]; then
+if [ -n "${GUI_EVAL_INTERVAL}" ]; then
   EVAL_ARGS+=(--eval-interval "${GUI_EVAL_INTERVAL}")
 fi
 
@@ -179,7 +190,7 @@ OPTIMIZER_ARGS=(
 )
 
 PERF_ARGS=(
-  --tensor-model-parallel-size 2
+  --tensor-model-parallel-size 4
   --sequence-parallel
   --pipeline-model-parallel-size 1
   --context-parallel-size 1
@@ -187,7 +198,7 @@ PERF_ARGS=(
   --expert-tensor-parallel-size 1
   --recompute-granularity full
   --recompute-method uniform
-  --recompute-num-layers 32
+  --recompute-num-layers 1
   --megatron-to-hf-mode bridge
   --use-dynamic-batch-size
   --max-tokens-per-gpu 1024
@@ -197,12 +208,14 @@ GRPO_ARGS=(
   --advantage-estimator grpo
   --dynamic_history
   --use-kl-loss
-  --kl-loss-coef 0.0
+  --kl-loss-type low_var_kl
+  --kl-loss-coef 0.01
 )
 
 SGLANG_ARGS=(
-  --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
+  --rollout-num-gpus-per-engine ${ROLLOUT_NUM_GPUS_PER_ENGINE}
   --sglang-mem-fraction-static 0.85
+  --sglang-reasoning-parser qwen3
 )
 
 CUSTOM_ARGS=(
@@ -320,16 +333,17 @@ RUNTIME_ENV_JSON="{
   }
 }"
 
+TRAIN_ENTRY=${TRAIN_ENTRY:-train_async.py}
 RAY_JOB_SUBMISSION_ID=${RAY_JOB_SUBMISSION_ID:-"gui_qwen35_4b_rl_$(date +%Y%m%d_%H%M%S)"}
 
 ray job submit --address="http://127.0.0.1:8265" \
   --submission-id "${RAY_JOB_SUBMISSION_ID}" \
   --no-wait \
   --runtime-env-json="${RUNTIME_ENV_JSON}" \
-  -- python3 -u "${SLIME_DIR}/train.py" \
+  -- python3 -u "${TRAIN_ENTRY}" \
   --actor-num-nodes 1 \
-  --actor-num-gpus-per-node "${ACTOR_GPUS}" \
-  --rollout-num-gpus "${ROLLOUT_GPUS}" \
+  --actor-num-gpus-per-node ${ACTOR_GPUS} \
+  --rollout-num-gpus ${ROLLOUT_GPUS} \
   --multimodal-keys "${MULTIMODAL_KEYS}" \
   ${MODEL_ARGS[@]} \
   ${CKPT_ARGS[@]} \
@@ -338,10 +352,12 @@ ray job submit --address="http://127.0.0.1:8265" \
   ${PERF_ARGS[@]} \
   ${OPTIMIZER_ARGS[@]} \
   ${GRPO_ARGS[@]} \
+  ${ROUTER_ARGS[@]} \
   ${SGLANG_ARGS[@]} \
   ${WANDB_ARGS[@]} \
   ${CUSTOM_ARGS[@]}
 
+echo "Following live Ray logs for ${RAY_JOB_SUBMISSION_ID}"
 set +e
 ray job logs --address="http://127.0.0.1:8265" "${RAY_JOB_SUBMISSION_ID}" -f --log-style=record
 RAY_LOG_EXIT=$?

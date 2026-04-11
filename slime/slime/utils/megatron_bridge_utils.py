@@ -69,6 +69,10 @@ def maybe_dump_bridge_runtime_layout(bridge, megatron_model):
     return str(output_path)
 
 
+def _use_text_only_qwen35_bridge() -> bool:
+    return os.getenv("SLIME_QWEN35_TEXT_ONLY_BRIDGE", "").lower() in {"1", "true", "yes", "on"}
+
+
 def build_bridge_for_hf_checkpoint(hf_checkpoint: str, *, load_weights: bool):
     import slime_plugins.megatron_bridge  # noqa: F401
     from transformers import AutoConfig
@@ -77,7 +81,7 @@ def build_bridge_for_hf_checkpoint(hf_checkpoint: str, *, load_weights: bool):
     hf_config = AutoConfig.from_pretrained(hf_checkpoint, trust_remote_code=True)
     model_type = getattr(hf_config, "model_type", None)
 
-    if model_type == "qwen3_5" and hasattr(hf_config, "text_config"):
+    if not _use_text_only_qwen35_bridge() and model_type == "qwen3_5" and hasattr(hf_config, "text_config"):
         from megatron.bridge.models.hf_pretrained.causal_lm import PreTrainedCausalLM
         from slime_plugins.megatron_bridge.qwen3_5 import MegatronQwen35VLBridge
 

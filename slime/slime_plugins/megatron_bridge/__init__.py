@@ -1,4 +1,6 @@
 # rope_theta_compat: monkey-patch Qwen3Config for transformers>=5.0
+import os
+
 try:
     from transformers.models.qwen3.configuration_qwen3 import Qwen3Config as _Qwen3Config
 
@@ -14,4 +16,7 @@ try:
 except Exception:
     pass
 
-import slime_plugins.megatron_bridge.qwen3_5  # noqa: F401  # register Qwen3.5 bridge
+if os.getenv("SLIME_QWEN35_TEXT_ONLY_BRIDGE", "").lower() in {"1", "true", "yes", "on"}:
+    import slime_plugins.megatron_bridge.qwen3_5_text  # noqa: F401  # register text-only Qwen3.5 bridge
+else:
+    import slime_plugins.megatron_bridge.qwen3_5  # noqa: F401  # register multimodal Qwen3.5 bridge
