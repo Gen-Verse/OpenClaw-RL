@@ -649,12 +649,13 @@ class RolloutManager:
         samples = _drop_removed_samples(samples)
         samples = self._drop_constant_reward_groups(samples)
         dp_size = self.train_parallel_config["dp_size"]
-        if len(samples) < dp_size:
+        remainder = len(samples) % dp_size
+        if len(samples) < dp_size or remainder != 0:
             logger.warning(
                 "Injecting %d dummy samples.",
-                dp_size - len(samples),
+                dp_size - remainder,
             )
-            samples.extend(_make_dummy_samples(dp_size - len(samples)))
+            samples.extend(_make_dummy_samples(dp_size - remainder))
 
         raw_rewards, rewards = self._post_process_rewards(samples)
 
