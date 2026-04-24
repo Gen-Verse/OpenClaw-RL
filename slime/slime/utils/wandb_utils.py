@@ -58,6 +58,13 @@ def init_wandb_primary(args):
         "config": _compute_config_for_logging(args),
     }
 
+    # When resuming training, continue logging to the same W&B run if a run id is provided
+    wandb_run_id = getattr(args, "wandb_run_id", None)
+    if wandb_run_id is not None:
+        init_kwargs["id"] = wandb_run_id
+        init_kwargs["resume"] = args.wandb_resume
+        logger.info("Resuming W&B run %s with resume=%s", wandb_run_id, args.wandb_resume)
+
     # Configure settings based on offline/online mode
     if offline:
         init_kwargs["settings"] = wandb.Settings(mode="offline")
