@@ -12,6 +12,7 @@ from ray.actor import ActorHandle
 from tqdm import tqdm
 
 from slime.utils.distributed_utils import get_gloo_group, init_process_group
+from slime.utils.common import is_npu
 
 from ..megatron_to_hf import convert_to_hf
 from .common import all_gather_param, named_params_and_buffers
@@ -253,6 +254,7 @@ def connect_rollout_engines_from_distributed(
         master_port = sock.getsockname()[1]
     world_size = len(rollout_engines) * args.rollout_num_gpus_per_engine + 1
 
+    backend = "hccl" if is_npu() else "nccl"
     refs = [
         engine.init_weights_update_group.remote(
             master_address,
@@ -260,12 +262,12 @@ def connect_rollout_engines_from_distributed(
             i * args.rollout_num_gpus_per_engine + 1,
             world_size,
             group_name,
-            backend="nccl",
+            backend=backend,
         )
         for i, engine in enumerate(rollout_engines)
     ]
     model_update_groups = init_process_group(
-        backend="nccl",
+        backend=backend,
         init_method=f"tcp://{master_address}:{master_port}",
         world_size=world_size,
         rank=0,

@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 
 from slime.utils.distributed_utils import distributed_masked_whiten
 from slime.utils.misc import load_function
+from slime.utils.common import is_npu
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def get_responses(
 
     Args:
         logits: Model outputs with shape ``[1, T, V]`` (policy) or
-            ``[1, T, 1]`` (value).
+            ``[1, T, 1]`` (value). Must be float32.
         args: Configuration containing ``rollout_temperature`` for scaling.
         unconcat_tokens: List of token tensors (prompt+response) per sample.
         total_lengths: Total sequence lengths (prompt+response) per sample.
@@ -101,6 +102,7 @@ def get_responses(
     """
     qkv_format = args.qkv_format
 
+    assert logits.dtype == torch.float32, f"{logits.dtype}"
     assert len(logits.shape) == 3, f"{logits.shape}"
 
     logits_gib = logits.nelement() * logits.element_size() / (1 << 30)
@@ -530,8 +532,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     # loss_masks live on CPU (lazy-loading optimisation).  We need GPU copies
     # for the advantage / KL / normalisation math below.  The original CPU
     # tensors in rollout_data["loss_masks"] are NOT modified.
-    if loss_masks and isinstance(loss_masks[0], torch.Tensor) and not loss_masks[0].is_cuda:
-        _gpu = torch.cuda.current_device()
+    if loss_masks and isinstance(loss_masks[0], torch.Tensor) and loss_masks[0].is_cpu:
+        if is_npu():
+            _gpu = torch.npu.current_device()
+        else:
+            _gpu = torch.cuda.current_device()
         loss_masks = [m.to(device=_gpu) for m in loss_masks]
 
     if args.kl_coef == 0 or not log_probs:
@@ -1198,7 +1203,7 @@ def loss_function(
 
     return (
         loss,
-        (num_tokens if args.calculate_per_token_loss else torch.tensor(1, device=logits.device)),
+        torch.tensor(num_tokens if args.calculate_per_token_loss else 1, device=logits.device),
         {
             "keys": list(log.keys()),
             "values": torch.tensor(

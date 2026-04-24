@@ -13,16 +13,23 @@ from slime.ray.ray_actor import RayActor
 from slime.utils.distributed_utils import init_gloo_group
 from slime.utils.logging_utils import configure_logger
 from slime.utils.memory_utils import clear_memory, print_memory
+from slime.utils.common import is_npu
 
 logger = logging.getLogger(__name__)
 
 
 def get_local_gpu_id():
-    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", None)
-    if cvd is None:
-        return ray.get_gpu_ids()[0]
+    if is_npu():
+        env_var = "ASCEND_RT_VISIBLE_DEVICES"
+        device_ids = ray.get_runtime_context().get_accelerator_ids()["NPU"]
     else:
-        return cvd.split(",").index(str(ray.get_gpu_ids()[0]))
+        env_var = "CUDA_VISIBLE_DEVICES"
+        device_ids = ray.get_gpu_ids()
+    cvd = os.environ.get(env_var, None)
+    if cvd is None:
+        return device_ids[0]
+    else:
+        return cvd.split(",").index(str(device_ids[0]))
 
 
 class TrainRayActor(RayActor):

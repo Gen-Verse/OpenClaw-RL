@@ -11,6 +11,8 @@ from megatron.core.transformer.transformer_layer import get_transformer_layer_of
 
 from slime.backends.megatron_utils.misc_utils import strip_param_name_prefix
 from slime.utils.types import ParamInfo
+from slime.utils.common import is_npu
+
 
 _DISABLE_LINEAR_FC1_RECHUNK = os.getenv("SLIME_QWEN35_DISABLE_LINEAR_FC1_RECHUNK", "0") == "1"
 
@@ -41,6 +43,9 @@ def _merge_tp_partitions(
     if "linear_fc1.weight" in name and not _DISABLE_LINEAR_FC1_RECHUNK:
         param_partitions = [p.chunk(2, dim=0) for p in param_partitions]
         param_partitions = [p[0] for p in param_partitions] + [p[1] for p in param_partitions]
+        # TODO: Temporary workaround for NPU to set partition_dim to 0
+        if is_npu():
+            partition_dim = 0
     # this is bug in megatron's grouped moe.
     if "linear_fc2.weight" in name and partition_dim == 0:
         partition_dim = 1

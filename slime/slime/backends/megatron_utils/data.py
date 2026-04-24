@@ -15,6 +15,7 @@ from slime.utils.flops_utils import calculate_fwd_flops
 from slime.utils.metric_utils import compute_pass_rate, compute_rollout_step
 from slime.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from slime.utils.types import RolloutBatch
+from slime.utils.common import is_npu
 
 from ...utils import logging_utils
 from .cp_utils import get_sum_of_sample_mean, slice_with_cp
@@ -31,9 +32,12 @@ def _to_cuda(val: object) -> object:
     if val is None:
         return None
     if isinstance(val, torch.Tensor):
-        if val.is_cuda:
-            return val
-        return val.to(device=torch.cuda.current_device(), non_blocking=True)
+        if is_npu():
+            return val.to(device=torch.npu.current_device(), non_blocking=True)
+        else:
+            if val.is_cuda:
+                return val
+            return val.to(device=torch.cuda.current_device(), non_blocking=True)
     if isinstance(val, list):
         return [_to_cuda(v) for v in val]
     if isinstance(val, tuple):

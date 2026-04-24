@@ -10,6 +10,11 @@ from contextlib import nullcontext
 import ray
 import torch
 import torch.distributed as dist
+
+from slime.utils.common import is_npu
+if is_npu():
+    import mindspeed.megatron_adaptor
+    from mindspeed.megatron_adaptor import repatch
 from megatron.core import mpu
 from ray.actor import ActorHandle
 from torch_memory_saver import torch_memory_saver
@@ -150,7 +155,10 @@ def _offload_rollout_data_to_cpu(rollout_data: RolloutBatch) -> None:
             rollout_data[key] = [v.to("cpu", non_blocking=True) for v in vals]
             moved_any = True
     if moved_any:
-        torch.cuda.synchronize()
+        if not is_npu():
+            torch.cuda.synchronize()
+        else:
+            torch.npu.synchronize()
 
 
 class MegatronTrainRayActor(TrainRayActor):
@@ -269,6 +277,8 @@ class MegatronTrainRayActor(TrainRayActor):
         super().init(args, role, with_ref)
 
         init(args)
+        if is_npu():
+            repatch(args)
 
         if is_megatron_main_rank():
             init_tracking(args, primary=False)
@@ -1054,8 +1064,12 @@ class MegatronTrainRayActor(TrainRayActor):
 
         group_name = "actor_critic"
         world_size = 2
+        if is_npu():
+            backend = "hccl"
+        else:
+            backend = "nccl"
         self._actor_critic_groups = init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=f"tcp://{master_address}:{master_port}",
             world_size=world_size,
             rank=0 if self.role == "actor" else 1,

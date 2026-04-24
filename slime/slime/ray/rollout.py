@@ -30,6 +30,7 @@ from slime.utils.metric_utils import (
 from slime.utils.misc import Box, group_by, load_function
 from slime.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from slime.utils.types import Sample
+from slime.utils.common import is_npu
 
 from ..utils.metric_utils import has_repetition
 from .utils import NOSET_VISIBLE_DEVICES_ENV_VARS_LIST, Lock
@@ -89,7 +90,8 @@ class RolloutManager:
             self.all_prm_engines = []
             self.num_new_prm_engines = 0
         self.nodes_per_engine = max(1, args.rollout_num_gpus_per_engine // args.num_gpus_per_node)
-        self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0).remote()
+        device_name = "NPU" if is_npu() else "GPU"
+        self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0, resources={device_name: 0}).remote()
         self.rollout_id = -1
 
         self._metric_checker = MetricChecker.maybe_create(args)
@@ -830,6 +832,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
     RolloutRayActor = ray.remote(SGLangEngine)
 
     rollout_engines = []
+    device_name = "NPU" if is_npu() else "GPU"
     for i in range(num_engines):
         if all_rollout_engines[i] is not None:
             continue
@@ -849,6 +852,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
         env_vars = {name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST} | {
             key: os.environ.get(key, default_val)
             for key, default_val in {
+                "SGL_JIT_DEEPGEMM_PRECOMPILE": "false",
                 "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "false",
                 "SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                 "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
@@ -868,11 +872,11 @@ def init_rollout_engines(args, pg, all_rollout_engines):
 
         rollout_engine = RolloutRayActor.options(
             num_cpus=num_cpus,
-            num_gpus=num_gpus,
             scheduling_strategy=scheduling_strategy,
             runtime_env={
                 "env_vars": env_vars,
             },
+            resources={device_name: num_gpus}
         ).remote(args, rank=i, worker_type=worker_type, base_gpu_id=base_gpu_id)
 
         rollout_engines.append((i, rollout_engine))
@@ -937,11 +941,12 @@ def init_prm_engines(args, pg, all_prm_engines):
             }.items()
         }
 
+        device_name = "NPU" if is_npu() else "GPU"
         prm_engine = RolloutRayActor.options(
             num_cpus=num_cpus,
-            num_gpus=num_gpus,
             scheduling_strategy=scheduling_strategy,
             runtime_env={"env_vars": env_vars},
+            resources={device_name: num_gpus}
         ).remote(args, rank=i, worker_type="regular", base_gpu_id=base_gpu_id, engine_role="prm")
 
         prm_engines.append((i, prm_engine))
