@@ -1179,6 +1179,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Whether to turn on passrate logging, which will log the pass@n of the responses in the rollout.",
             )
             parser.add_argument("--wandb-run-id", type=str, default=None)
+            parser.add_argument("--wandb-resume", type=str, default="allow")
             return parser
 
         # tensorboard
