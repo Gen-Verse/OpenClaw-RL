@@ -102,7 +102,6 @@ def get_responses(
     """
     qkv_format = args.qkv_format
 
-    assert logits.dtype == torch.float32, f"{logits.dtype}"
     assert len(logits.shape) == 3, f"{logits.shape}"
 
     logits_gib = logits.nelement() * logits.element_size() / (1 << 30)
