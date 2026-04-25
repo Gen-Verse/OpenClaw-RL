@@ -12,6 +12,8 @@ pkill -9 python
 
 set -ex
 
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+
 # keep stdout/stderr unbuffered in ray jobs
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
