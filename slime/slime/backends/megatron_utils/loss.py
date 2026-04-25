@@ -88,7 +88,7 @@ def get_responses(
 
     Args:
         logits: Model outputs with shape ``[1, T, V]`` (policy) or
-            ``[1, T, 1]`` (value). Must be float32.
+            ``[1, T, 1]`` (value).
         args: Configuration containing ``rollout_temperature`` for scaling.
         unconcat_tokens: List of token tensors (prompt+response) per sample.
         total_lengths: Total sequence lengths (prompt+response) per sample.
