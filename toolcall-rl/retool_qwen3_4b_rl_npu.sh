@@ -166,7 +166,7 @@ CUSTOM_ARGS=(
    --custom-rm-path generate_with_retool.reward_func
 )
 
-export PYTORCH_NPU_ALLOC_CONF=${PYTORCH_NPU_ALLOC_CONF:-"max_split_size_mb:2048,expandable_segments:True"}
+export PYTORCH_NPU_ALLOC_CONF=${PYTORCH_NPU_ALLOC_CONF:-"expandable_segments:True"}
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
@@ -177,7 +177,7 @@ RUNTIME_ENV_JSON="{
   \"env_vars\": {
     \"PYTHONPATH\": \"${MEGATRON_LM_PATH}:${MEGATRON_BRIDGE_PATH}:${SGLANG_PATH}:${SCRIPT_DIR}:${SLIME_DIR}:$PYTHONPATH\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"PYTORCH_NPU_ALLOC_CONF\": \"${PYTORCH_NPU_ALLOC_CONF}\"
+    \"PYTORCH_NPU_ALLOC_CONF\": \"${PYTORCH_NPU_ALLOC_CONF}\",
     \"ASCEND_TOOLKIT_HOME\": \"/path/to/cann/\",
     \"ASCEND_OPP_PATH\": \"/path/to/cann/\",
     \"ASCEND_AICPU_PATH\": \"/path/to/cann/\",
