@@ -1,0 +1,17 @@
+experiments:
+  - name: baseline
+    multi_judge: false
+    failure_replay: false
+    cost_penalty: false
+  - name: plus_multi_judge
+    multi_judge: true
+    failure_replay: false
+    cost_penalty: false
+  - name: plus_failure_replay
+    multi_judge: true
+    failure_replay: true
+    cost_penalty: false
+  - name: full
+    multi_judge: true
+    failure_replay: true
+    cost_penalty: true

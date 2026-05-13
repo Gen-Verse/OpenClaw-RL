@@ -1,0 +1,26 @@
+services:
+  slime_trainer:
+    image: slime:latest
+    command: >
+      python slime/train.py
+      --config slime-coding-agent/configs/base.yaml
+    env:
+      CUDA_VISIBLE_DEVICES: "0,1,2,3"
+      MASTER_ADDR: "127.0.0.1"
+      MASTER_PORT: "29500"
+
+  sglang_rollout:
+    image: sglang:latest
+    command: >
+      python -m sglang.launch_server
+      --model-path Qwen/Qwen3-4B
+      --port 30000
+    env:
+      CUDA_VISIBLE_DEVICES: "4,5"
+
+  coding_agent_runner:
+    image: python:3.11
+    command: >
+      python slime-coding-agent/runner/coding_agent_runner.py
+    depends_on:
+      - sglang_rollout

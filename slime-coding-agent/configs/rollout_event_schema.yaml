@@ -1,0 +1,37 @@
+version: v2
+required_fields:
+  - event_id
+  - timestamp
+  - repo_id
+  - task_id
+  - benchmark_id
+  - commit_base
+  - action_type
+  - action_payload
+  - command_results
+  - test_results
+  - reward_components
+  - total_reward
+  - final_status
+
+reward_components:
+  pass: float
+  quality: float
+  safety: float
+  human: float
+  cost: float
+
+action_types:
+  - plan
+  - edit
+  - run_command
+  - run_tests
+  - reflect
+  - rollback
+  - commit
+
+constraints:
+  max_changed_files_default: 8
+  max_patch_lines_default: 400
+  require_test_before_commit: true
+  require_trace_for_eval: true

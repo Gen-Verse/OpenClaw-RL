@@ -1,0 +1,17 @@
+project:
+  name: slime-coding-agent
+  seed: 42
+
+model:
+  policy_model: Qwen/Qwen3-4B
+  judge_model: Qwen/Qwen3-4B
+
+runtime:
+  planner_enabled: true
+  verifier_enabled: true
+  max_steps: 8
+  diff_budget_lines: 400
+
+logging:
+  output_dir: slime-coding-agent/outputs
+  event_log: events.jsonl

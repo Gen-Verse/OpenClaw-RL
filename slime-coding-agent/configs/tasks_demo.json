@@ -1,0 +1,16 @@
+[
+  {
+    "repo_id": "demo/repo",
+    "task_id": "task-echo",
+    "benchmark_id": "swebench-lite",
+    "commit_base": "HEAD",
+    "commands": ["echo hello", "python -c \"print(1+1)\""]
+  },
+  {
+    "repo_id": "demo/repo",
+    "task_id": "task-fail",
+    "benchmark_id": "swebench-lite",
+    "commit_base": "HEAD",
+    "commands": ["python -c \"import sys; sys.exit(1)\""]
+  }
+]
