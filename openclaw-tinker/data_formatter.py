@@ -103,7 +103,7 @@ def _build_datum(all_tokens: list[int], logprobs: list[float], advantages: list[
 # RL / OPD datum conversion
 # ---------------------------------------------------------------------------
 
-def sample_to_datum(sample: TrainingSample, advantage: float):
+def sample_to_datum(sample: TrainingSample, advantage: float, max_tokens: int = 0):
     """Convert one sample + scalar advantage into a Tinker Datum (RL / OPD).
 
     For OPD samples with teacher_logprobs, the advantage is augmented with
@@ -111,8 +111,20 @@ def sample_to_datum(sample: TrainingSample, advantage: float):
     This matches Slime's --advantage-estimator on_policy_distillation where
     advantage = teacher_logp - old_logp (raw, no coefficient).
     """
-    prompt_len = len(sample.prompt_tokens)
-    all_tokens = sample.prompt_tokens + sample.response_tokens
+    prompt_tokens = sample.prompt_tokens
+    # Truncate prompt from left if total exceeds max_tokens (keep response intact)
+    if max_tokens > 0:
+        total = len(prompt_tokens) + len(sample.response_tokens)
+        if total > max_tokens:
+            keep = max(1, max_tokens - len(sample.response_tokens))
+            trimmed = len(prompt_tokens) - keep
+            prompt_tokens = prompt_tokens[-keep:]
+            logger.info(
+                "[DataFormatter] truncated prompt: %d -> %d tokens (session=%s turn=%d)",
+                trimmed + keep, keep, sample.session_id, sample.turn_num,
+            )
+    prompt_len = len(prompt_tokens)
+    all_tokens = prompt_tokens + sample.response_tokens
 
     logprobs = [0.0] * (prompt_len - 1) + list(sample.response_logprobs)
     resp_advantages = [advantage * float(m) for m in sample.loss_mask]
@@ -128,12 +140,13 @@ def sample_to_datum(sample: TrainingSample, advantage: float):
     return _build_datum(all_tokens, logprobs, advantages, sample.session_id, sample.turn_num)
 
 
-def batch_to_datums(batch: list[TrainingSample], advantages: list[float]) -> list:
+def batch_to_datums(batch: list[TrainingSample], advantages: list[float],
+                    max_tokens: int = 0) -> list:
     """Convert a batch of samples + per-sample scalar advantages to Tinker Datums."""
     datums = []
     for sample, adv in zip(batch, advantages):
         try:
-            datums.append(sample_to_datum(sample, adv))
+            datums.append(sample_to_datum(sample, adv, max_tokens=max_tokens))
         except Exception as e:
             logger.error(
                 "[DataFormatter] FAILED to convert session=%s turn=%d: %s",
@@ -150,6 +163,7 @@ def sample_to_datum_combined(
     sample: TrainingSample,
     w_opd: float = 1.0,
     w_rl: float = 1.0,
+    max_tokens: int = 0,
 ):
     """Convert one sample into a Tinker Datum with combined OPD+RL advantages.
 
@@ -160,8 +174,14 @@ def sample_to_datum_combined(
     where teacher_advantages = teacher_logp - old_logp (token-level, raw)
     and   grpo_advantages   = reward broadcast (scalar)
     """
-    prompt_len = len(sample.prompt_tokens)
-    all_tokens = sample.prompt_tokens + sample.response_tokens
+    prompt_tokens = sample.prompt_tokens
+    if max_tokens > 0:
+        total = len(prompt_tokens) + len(sample.response_tokens)
+        if total > max_tokens:
+            keep = max(1, max_tokens - len(sample.response_tokens))
+            prompt_tokens = prompt_tokens[-keep:]
+    prompt_len = len(prompt_tokens)
+    all_tokens = prompt_tokens + sample.response_tokens
 
     logprobs = [0.0] * (prompt_len - 1) + list(sample.response_logprobs)
 
@@ -189,13 +209,14 @@ def batch_to_datums_combined(
     batch: list[TrainingSample],
     w_opd: float = 1.0,
     w_rl: float = 1.0,
+    max_tokens: int = 0,
 ) -> list:
     """Convert a batch of samples to Tinker Datums with combined advantages."""
     datums = []
     for sample in batch:
         try:
             datums.append(sample_to_datum_combined(
-                sample, w_opd=w_opd, w_rl=w_rl,
+                sample, w_opd=w_opd, w_rl=w_rl, max_tokens=max_tokens,
             ))
         except Exception as e:
             logger.error(
