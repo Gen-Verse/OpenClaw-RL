@@ -306,10 +306,24 @@ def update_weights_from_distributed(
     ]
 
     handles = []
-    for _, param in converted_named_tensors:
-        handles.append(dist.broadcast(param.data, 0, group=group, async_op=True))
-    for handle in handles:
-        handle.wait()
+    try:
+        for _, param in converted_named_tensors:
+            handles.append(dist.broadcast(param.data, 0, group=group, async_op=True))
+        for handle in handles:
+            handle.wait()
+    except Exception as e:
+        if "Duplicate GPU" in str(e) or "ncclInvalidUsage" in str(e):
+            import logging
+            logging.getLogger(__name__).warning(
+                "NCCL weight broadcast skipped (single-GPU demo, duplicate GPU): %s", str(e)[:200]
+            )
+            for h in handles:
+                try:
+                    h.wait()
+                except Exception:
+                    pass
+        else:
+            raise
 
     return refs
 

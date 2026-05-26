@@ -139,7 +139,10 @@ class TerminalEnv:
                     logger=logger,
                 )
             else:
-                self._terminal.start(timeout=self._timeouts.reset_session)
+                try:
+                    self._terminal.start(timeout=self._timeouts.reset_session)
+                except TypeError:
+                    self._terminal.start()
                 try:
                     from .docker_compose_utils import (
                         _DEFAULT_CONTAINER_MEMORY_LIMIT,

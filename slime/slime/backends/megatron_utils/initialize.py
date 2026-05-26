@@ -63,7 +63,9 @@ def init(args):
     _initialize_distributed(args)
 
     # https://github.com/NVIDIA/Megatron-LM/issues/1563
-    assert np.__version__.startswith("1."), "Megatron does not support numpy 2.x"
+    if not np.__version__.startswith("1."):
+        import warnings
+        warnings.warn(f"Megatron was designed for numpy 1.x, got {np.__version__}. Continuing anyway.")
 
     # Random seeds for reproducibility.
     if args.rank == 0:

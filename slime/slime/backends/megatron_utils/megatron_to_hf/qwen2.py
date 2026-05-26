@@ -68,4 +68,15 @@ def convert_qwen2_to_hf(args, name, param):
         elif rest == "self_attention.k_layernorm.weight":
             return [(f"model.layers.{layer_idx}.self_attn.k_norm.weight", param)]
 
+        # local (non-TE) impl: standalone layernorm modules
+        elif rest == "input_layernorm.weight":
+            return [(f"model.layers.{layer_idx}.input_layernorm.weight", param)]
+        elif rest in ("pre_mlp_layernorm.weight", "post_attention_layernorm.weight"):
+            return [(f"model.layers.{layer_idx}.post_attention_layernorm.weight", param)]
+        elif rest == "mlp.router.weight":
+            return [(f"model.layers.{layer_idx}.mlp.gate.weight", param)]
+        elif rest == "self_attention.core_attention.rotary_emb.inv_freq":
+            # rotary embeddings are not saved in HF format
+            return []
+
     raise ValueError(f"Unknown parameter name: {name}")

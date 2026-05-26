@@ -243,6 +243,12 @@ class SGLangEngine(RayActor):
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
+            if "Duplicate GPU detected" in response.text or "ncclInvalidUsage" in response.text:
+                logger.warning(
+                    "Weight sync skipped (NCCL duplicate GPU on single-GPU setup): %s",
+                    response.text[:200],
+                )
+                return {"success": True, "skipped": True}
             e.add_note(f"{response.text=}")
             raise
         return response.json()
