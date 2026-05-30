@@ -647,7 +647,7 @@ def chunked_gae(
 
 
 def _is_oom_error(exc: BaseException) -> bool:
-    if isinstance(exc, torch.cuda.OutOfMemoryError):
+    if isinstance(exc, torch.cuda.OutOfMemoryError) or "OutOfMemory" in str(exc):
         return True
     return "out of memory" in str(exc).lower()
 

@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 
 from slime.utils.distributed_utils import distributed_masked_whiten
 from slime.utils.misc import load_function
+from slime.utils.common import is_npu
 
 logger = logging.getLogger(__name__)
 
@@ -584,8 +585,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     # loss_masks live on CPU (lazy-loading optimisation).  We need GPU copies
     # for the advantage / KL / normalisation math below.  The original CPU
     # tensors in rollout_data["loss_masks"] are NOT modified.
-    if loss_masks and isinstance(loss_masks[0], torch.Tensor) and not loss_masks[0].is_cuda:
-        _gpu = torch.cuda.current_device()
+    if loss_masks and isinstance(loss_masks[0], torch.Tensor) and loss_masks[0].is_cpu:
+        if is_npu():
+            _gpu = torch.npu.current_device()
+        else:
+            _gpu = torch.cuda.current_device()
         loss_masks = [m.to(device=_gpu) for m in loss_masks]
 
     if args.kl_coef == 0 or not log_probs:
@@ -1252,7 +1256,7 @@ def loss_function(
 
     return (
         loss,
-        (num_tokens if args.calculate_per_token_loss else torch.tensor(1, device=logits.device)),
+        torch.tensor(num_tokens if args.calculate_per_token_loss else 1, device=logits.device),
         {
             "keys": list(log.keys()),
             "values": torch.tensor(

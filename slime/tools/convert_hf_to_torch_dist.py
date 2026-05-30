@@ -4,6 +4,10 @@ import shutil
 
 import torch
 import torch.distributed as dist
+from slime.utils.common import is_npu
+if is_npu():
+    import mindspeed.megatron_adaptor
+    from mindspeed.megatron_adaptor import repatch
 from megatron.core.enums import ModelType
 from megatron.training.arguments import parse_args, validate_args
 from megatron.training.checkpointing import get_checkpoint_name, get_checkpoint_tracker_filename, save_checkpoint
@@ -164,20 +168,32 @@ def main():
     local_rank = int(os.getenv("LOCAL_RANK") or os.getenv("SLURM_LOCALID") or 0)
     global_rank = int(os.getenv("RANK") or os.getenv("SLURM_PROCID") or 0)
 
-    torch.cuda.set_device(local_rank)
+    if is_npu():
+        torch.npu.set_device(local_rank)
+    else:
+        torch.cuda.set_device(local_rank)
     os.environ.setdefault("WORLD_SIZE", str(world_size))
     os.environ.setdefault("RANK", str(global_rank))
     os.environ.setdefault("LOCAL_RANK", str(local_rank))
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "12355")
-    dist.init_process_group(
-        backend="nccl",
-        world_size=world_size,
-        rank=global_rank,
-        device_id=torch.device(f"cuda:{local_rank}"),
-    )
+    if is_npu():
+        dist.init_process_group(
+            backend="hccl",
+            world_size=world_size,
+            rank=global_rank,
+        )
+    else:
+        dist.init_process_group(
+            backend="nccl",
+            world_size=world_size,
+            rank=global_rank,
+            device_id=torch.device(f"cuda:{local_rank}"),
+        )
     args = get_args()
     init(args)
+    if is_npu():
+        repatch(args)
 
     # if using AMD gpus, we have to do the conversion in cpu
     if hasattr(torch.version, "hip") and torch.version.hip is not None:

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from slime.utils.external_utils.typer_utils import dataclass_cli
 from slime.utils.misc import exec_command
+from slime.utils.common import is_npu
 
 _ = exec_command, dataclass_cli
 
@@ -127,10 +128,11 @@ def execute_train(
     )
 
     if not external_ray:
+        gpus_config = "" if is_npu() else f"--num-gpus {num_gpus_per_node}"
         exec_command(
             # will prevent ray from buffering stdout/stderr
             f"export PYTHONBUFFERED=16 && "
-            f"ray start --head --node-ip-address {master_addr} --num-gpus {num_gpus_per_node} --disable-usage-stats"
+            f"ray start --head --node-ip-address {master_addr} {gpus_config} --disable-usage-stats"
         )
 
     if (f := before_ray_job_submit) is not None:
@@ -140,6 +142,16 @@ def execute_train(
         {
             "env_vars": {
                 "PYTHONPATH": "/root/Megatron-LM/",
+                "RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES": "1",
+                # Replace with actual Ascend toolkit paths
+                "ASCEND_TOOLKIT_HOME": "/path/to/ascend/ascend-toolkit/latest/",
+                "ASCEND_OPP_PATH": "/path/to/ascend/ascend-toolkit/latest/opp/",
+                "ASCEND_AICPU_PATH": "/path/to/ascend/ascend-toolkit/latest/",
+                "ASCEND_HOME_PATH": "/path/to/ascend/ascend-toolkit/latest/",
+                "set_env_path": "/path/to/ascend/nnal/atb/set_env.sh",
+                "HYDRA_FULL_ERROR": "1",
+                "HCCL_HOST_SOCKET_PORT_RANGE": "60000-60050",
+                "HCCL_NPU_SOCKET_PORT_RANGE": "61000-61050",
                 # If setting this in FSDP, the computation communication overlapping may have issues
                 **(
                     {}

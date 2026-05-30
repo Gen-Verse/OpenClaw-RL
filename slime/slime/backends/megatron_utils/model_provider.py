@@ -1,7 +1,6 @@
 # Adapt from https://github.com/NVIDIA/Megatron-LM/blob/b1efb3c7126ef7615e8c333432d76e08038e17ff/pretrain_gpt.py
 import argparse
 import inspect
-import re
 from contextlib import nullcontext
 from typing import Literal
 
@@ -125,6 +124,11 @@ def get_model_provider_func(
             provider.recompute_granularity = args.recompute_granularity
             provider.recompute_method = args.recompute_method
             provider.recompute_num_layers = args.recompute_num_layers
+
+        for key, value in vars(args).items():
+            if hasattr(provider, key):
+                continue
+            setattr(provider, key, value)
 
         # CLI flags that materially affect train numerics/quality and per-step
         # speed but are NOT derivable from the HF config. Without these, bridge

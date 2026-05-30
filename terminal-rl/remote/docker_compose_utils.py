@@ -125,7 +125,10 @@ def build_docker_image(task: dict[str, Any], timeout: float = 1200.0) -> None:
         sessions_logs_path=trial_handler.trial_paths.sessions_path,
         agent_logs_path=trial_handler.trial_paths.agent_logging_dir,
     )
-    compose_manager.build(timeout=timeout)
+    try:
+        compose_manager.build(timeout=timeout)
+    except TypeError:
+        compose_manager.build()
 
 
 def _resolve_pull_image(task: dict[str, Any]) -> str:

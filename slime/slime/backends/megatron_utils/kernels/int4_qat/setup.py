@@ -43,7 +43,7 @@ setup(
                     f'-gencode=arch=compute_{arch.replace(".", "")},code=sm_{arch.replace(".", "")}'
                     for arch in arch_list
                 ]
-                + ["-gencode=arch=compute_90a,code=sm_90a"],
+                + (["-gencode=arch=compute_90a,code=sm_90a"] if not hasattr(torch,'npu') else []),
             },
         )
     ],

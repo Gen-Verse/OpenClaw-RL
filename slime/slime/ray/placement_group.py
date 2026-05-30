@@ -4,6 +4,7 @@ import socket
 import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
+from slime.utils.common import is_npu
 
 from .actor_group import RayTrainGroup
 from .rollout import RolloutManager
@@ -11,10 +12,13 @@ from .rollout import RolloutManager
 logger = logging.getLogger(__name__)
 
 
-@ray.remote(num_gpus=1)
+@ray.remote
 class InfoActor:
     def get_ip_and_gpu_id(self):
-        return ray.util.get_node_ip_address(), ray.get_gpu_ids()[0]
+        if is_npu():
+            return ray.util.get_node_ip_address(), ray.get_runtime_context().get_accelerator_ids()["NPU"][0]
+        else:
+            return ray.util.get_node_ip_address(), ray.get_gpu_ids()[0]
 
 
 def sort_key(x):
@@ -35,12 +39,13 @@ def sort_key(x):
             # representation that allows for sorting.
             node_ip_parts = [ord(c) for c in node_identifier]
 
-    return (node_ip_parts, gpu_id)
+    return (node_ip_parts, int(gpu_id))
 
 
 def _create_placement_group(num_gpus):
     """Create a placement group with the specified number of GPUs."""
-    bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_gpus)]
+    device_name = "NPU" if is_npu() else "GPU"
+    bundles = [{device_name: 1, "CPU": 1} for _ in range(num_gpus)]
     pg = placement_group(bundles, strategy="PACK")
     num_bundles = len(bundles)
 
@@ -53,7 +58,8 @@ def _create_placement_group(num_gpus):
                 scheduling_strategy=PlacementGroupSchedulingStrategy(
                     placement_group=pg,
                     placement_group_bundle_index=i,
-                )
+                ),
+                resources={device_name: 1}
             ).remote()
         )
     gpu_ids = ray.get([actor.get_ip_and_gpu_id.remote() for actor in info_actors])
@@ -201,9 +207,11 @@ def create_training_models(args, pgs, rollout_manager):
 
 
 def create_rollout_manager(args, pg, prm_pg=None):
+    device_name = "NPU" if is_npu() else "GPU"
     rollout_manager = RolloutManager.options(
         num_cpus=1,
         num_gpus=0,
+        resources={device_name: 0}
     ).remote(args, pg, prm_pg)
 
     # calculate num_rollout from num_epoch

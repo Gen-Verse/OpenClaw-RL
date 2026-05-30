@@ -2,6 +2,10 @@ import logging
 
 import torch
 
+from slime.utils.common import is_npu
+if is_npu():
+    import mindspeed.megatron_adaptor
+
 try:
     import deep_ep
     from torch_memory_saver import torch_memory_saver
@@ -39,4 +43,22 @@ try:
 except ImportError:
     pass
 
+try:
+    from mbridge.models.qwen3_vl.model import Qwen3VLModel
+    _original_forward2 = Qwen3VLModel.forward
+
+    def _patched_forward2(self, *args, loss_mask=None, **kwargs):
+        return _original_forward2(self, *args, **kwargs)
+    Qwen3VLModel.forward = _patched_forward2
+except ImportError:
+    pass
+try:
+    from megatron.bridge.models.qwen_vl.modelling_qwen3_vl.model import Qwen3VLModel
+    _original_forward3 = Qwen3VLModel.forward
+    
+    def _patched_forward3(self, *args, loss_mask=None, **kwargs):
+        return _original_forward3(self, *args, **kwargs)
+    Qwen3VLModel.forward = _patched_forward3
+except ImportError:
+    pass
 logging.getLogger("megatron").setLevel(logging.WARNING)
