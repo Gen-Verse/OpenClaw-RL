@@ -770,6 +770,21 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
             logger.error(f"Failed to save HuggingFace format: {e}")
 
 
+def _setup_inference_only_model(args: Namespace, role: str):
+    """Build model without DDP wrapping or optimizer for inference-only roles.
+
+    This avoids allocating gradient buffers and optimizer states that would
+    otherwise cause OOM on a single GPU when the model only needs forward
+    passes.
+    """
+    model = get_model(
+        wrap_model_provider_with_freeze(get_model_provider_func(args, role), args),
+        ModelType.encoder_or_decoder,
+        wrap_with_ddp=False,
+    )
+    return model
+
+
 def initialize_model_and_optimizer(
     args: Namespace, role: str = "actor"
 ) -> tuple[list[DDP], MegatronOptimizer, OptimizerParamScheduler, int]:
@@ -790,6 +805,20 @@ def initialize_model_and_optimizer(
 
         filesystem_async_module.FileSystemWriterAsync = ROCmFileSystemWriterAsync
         print("[ROCm] Applied FileSystemWriterAsync patch for HIP compatibility")
+
+    if role == "prm_teacher":
+        model = _setup_inference_only_model(args, role)
+        model[0].role = role
+        clear_memory()
+        iteration, _ = load_checkpoint(
+            model,
+            None,
+            None,
+            checkpointing_context={},
+            skip_load_to_model_and_opt=False,
+        )
+        clear_memory()
+        return model, None, None, iteration
 
     model, optimizer, opt_param_scheduler = setup_model_and_optimizer(args, role)
     model[0].role = role
