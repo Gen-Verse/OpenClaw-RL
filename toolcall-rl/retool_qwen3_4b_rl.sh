@@ -51,8 +51,7 @@ HF_CKPT=${HF_CKPT:-/data_storage/wyj/systems/huggingface/hub/qwen3-4b-retool-sft
 REF_LOAD=${REF_LOAD:-/data_storage/wyj/systems/huggingface/hub/qwen3-4b-retool-sft_torch_dist}
 SAVE_CKPT=${SAVE_CKPT:-/data_storage/wyj/OpenClaw-RL/ckpt/qwen3-4b-retool-rl/}
 RESUME_LOAD=${RESUME_LOAD:-${SAVE_CKPT}}
-# Use the existing run id to continue plotting on the same W&B curve.
-#WANDB_RESUME=${WANDB_RESUME:-must}
+
 
 CKPT_ARGS=(
    --hf-checkpoint ${HF_CKPT}
@@ -136,6 +135,9 @@ WANDB_ARGS=(
    --wandb-project slime_retool
    --wandb-group qwen3-4B-rl_retool
    --wandb-key ${WANDB_KEY}
+   # Use the existing run id to continue plotting on the same W&B curve.
+   # --wandb-run-id <existing_run_id>
+   # --wandb-resume must
 )
 
 SGLANG_ARGS=(
