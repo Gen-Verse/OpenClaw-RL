@@ -286,16 +286,16 @@ const BASE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
     label: "OpenCode Zen (multi-model proxy)",
     hint: "Claude, GPT, Gemini via opencode.ai/zen",
   },
-  { value: "minimax-api", label: "MiniMax M2.5" },
+  { value: "minimax-api", label: "MiniMax M3" },
   {
     value: "minimax-api-key-cn",
-    label: "MiniMax M2.5 (CN)",
+    label: "MiniMax M3 (CN)",
     hint: "China endpoint (api.minimaxi.com)",
   },
   {
     value: "minimax-api-lightning",
-    label: "MiniMax M2.5 Highspeed",
-    hint: "Official fast tier (legacy: Lightning)",
+    label: "MiniMax M2.7",
+    hint: "Fast tier (M2.7)",
   },
   { value: "custom-api-key", label: "Custom Provider" },
 ];

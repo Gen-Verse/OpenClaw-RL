@@ -58,10 +58,10 @@ type ModelsConfig = NonNullable<OpenClawConfig["models"]>;
 export type ProviderConfig = NonNullable<ModelsConfig["providers"]>[string];
 
 const MINIMAX_PORTAL_BASE_URL = "https://api.minimax.io/anthropic";
-const MINIMAX_DEFAULT_MODEL_ID = "MiniMax-M2.5";
+const MINIMAX_DEFAULT_MODEL_ID = "MiniMax-M3";
 const MINIMAX_DEFAULT_VISION_MODEL_ID = "MiniMax-VL-01";
-const MINIMAX_DEFAULT_CONTEXT_WINDOW = 200000;
-const MINIMAX_DEFAULT_MAX_TOKENS = 8192;
+const MINIMAX_DEFAULT_CONTEXT_WINDOW = 512000;
+const MINIMAX_DEFAULT_MAX_TOKENS = 128000;
 const MINIMAX_OAUTH_PLACEHOLDER = "minimax-oauth";
 // Pricing per 1M tokens (USD) — https://platform.minimaxi.com/document/Price
 const MINIMAX_API_COST = {
@@ -586,25 +586,21 @@ function buildMinimaxProvider(): ProviderConfig {
     authHeader: true,
     models: [
       buildMinimaxModel({
+        id: MINIMAX_DEFAULT_MODEL_ID,
+        name: "MiniMax M3",
+        reasoning: true,
+        input: ["text", "image"],
+      }),
+      buildMinimaxTextModel({
+        id: "MiniMax-M2.7",
+        name: "MiniMax M2.7",
+        reasoning: true,
+      }),
+      buildMinimaxModel({
         id: MINIMAX_DEFAULT_VISION_MODEL_ID,
         name: "MiniMax VL 01",
         reasoning: false,
         input: ["text", "image"],
-      }),
-      buildMinimaxTextModel({
-        id: "MiniMax-M2.5",
-        name: "MiniMax M2.5",
-        reasoning: true,
-      }),
-      buildMinimaxTextModel({
-        id: "MiniMax-M2.5-highspeed",
-        name: "MiniMax M2.5 Highspeed",
-        reasoning: true,
-      }),
-      buildMinimaxTextModel({
-        id: "MiniMax-M2.5-Lightning",
-        name: "MiniMax M2.5 Lightning",
-        reasoning: true,
       }),
     ],
   };
@@ -616,19 +612,15 @@ function buildMinimaxPortalProvider(): ProviderConfig {
     api: "anthropic-messages",
     authHeader: true,
     models: [
-      buildMinimaxTextModel({
+      buildMinimaxModel({
         id: MINIMAX_DEFAULT_MODEL_ID,
-        name: "MiniMax M2.5",
+        name: "MiniMax M3",
         reasoning: true,
+        input: ["text", "image"],
       }),
       buildMinimaxTextModel({
-        id: "MiniMax-M2.5-highspeed",
-        name: "MiniMax M2.5 Highspeed",
-        reasoning: true,
-      }),
-      buildMinimaxTextModel({
-        id: "MiniMax-M2.5-Lightning",
-        name: "MiniMax M2.5 Lightning",
+        id: "MiniMax-M2.7",
+        name: "MiniMax M2.7",
         reasoning: true,
       }),
     ],

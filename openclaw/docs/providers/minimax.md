@@ -1,5 +1,5 @@
 ---
-summary: "Use MiniMax M2.7 in OpenClaw"
+summary: "Use MiniMax M3 in OpenClaw"
 read_when:
   - You want MiniMax models in OpenClaw
   - You need MiniMax setup guidance
@@ -8,17 +8,19 @@ title: "MiniMax"
 
 # MiniMax
 
-MiniMax is an AI company that builds the **M2/M2.5/M2.7** model family. The current
-coding-focused release is **MiniMax M2.7**, the latest flagship model with
-enhanced reasoning and coding capabilities.
+MiniMax is an AI company that builds the **M2/M2.7/M3** model family. The current
+coding-focused release is **MiniMax M3**, the latest flagship model with
+enhanced reasoning, coding, and image-input capabilities (512K context, 128K max output).
 
-## Model overview (M2.7)
+## Model overview (M3)
 
-MiniMax M2.7 builds on the M2.5 foundation with key improvements:
+MiniMax M3 builds on the M2.7 foundation with key improvements:
 
 - Enhanced **reasoning and coding** capabilities across all supported languages.
 - Stronger **multi-language coding** (Rust, Java, Go, C++, Kotlin, Objective-C, TS/JS).
 - Better **web/app development** and aesthetic output quality (including native mobile).
+- **Native image input** support for vision workflows.
+- **512K context window** and **128K max output** for longer, more complex tasks.
 - Improved **composite instruction** handling for office-style workflows, building on
   interleaved thinking and integrated constraint execution.
 - **More concise responses** with lower token usage and faster iteration loops.
@@ -26,12 +28,12 @@ MiniMax M2.7 builds on the M2.5 foundation with key improvements:
   Droid/Factory AI, Cline, Kilo Code, Roo Code, BlackBox).
 - Higher-quality **dialogue and technical writing** outputs.
 
-## MiniMax M2.7 vs MiniMax M2.7 Highspeed
+## MiniMax M3 vs MiniMax M2.7
 
-- **Speed:** `MiniMax-M2.7-highspeed` is the official fast tier for low-latency scenarios.
-- **Cost:** MiniMax pricing lists the same input cost and a higher output cost for highspeed.
-- **Compatibility:** OpenClaw still accepts legacy `MiniMax-M2.5`, `MiniMax-M2.5-highspeed`,
-  and `MiniMax-M2.5-Lightning` configs, but prefer `MiniMax-M2.7` for new setup.
+- **Speed:** `MiniMax-M2.7` is still available as a fast/legacy tier for low-latency scenarios.
+- **Capabilities:** M3 adds image input and larger context (512K vs 192K).
+- **Compatibility:** OpenClaw accepts both `MiniMax-M3` and `MiniMax-M2.7`; prefer
+  `MiniMax-M3` for new setup.
 
 ## Choose a setup
 
@@ -54,7 +56,7 @@ You will be prompted to select an endpoint:
 
 See [MiniMax OAuth plugin README](https://github.com/openclaw/openclaw/tree/main/extensions/minimax-portal-auth) for details.
 
-### MiniMax M2.7 (API key)
+### MiniMax M3 (API key)
 
 **Best for:** hosted MiniMax with Anthropic-compatible API.
 
@@ -62,12 +64,12 @@ Configure via CLI:
 
 - Run `openclaw configure`
 - Select **Model/auth**
-- Choose **MiniMax M2.7**
+- Choose **MiniMax M3**
 
 ```json5
 {
   env: { MINIMAX_API_KEY: "sk-..." },
-  agents: { defaults: { model: { primary: "minimax/MiniMax-M2.7" } } },
+  agents: { defaults: { model: { primary: "minimax/MiniMax-M3" } } },
   models: {
     mode: "merge",
     providers: {
@@ -77,22 +79,22 @@ Configure via CLI:
         api: "anthropic-messages",
         models: [
           {
+            id: "MiniMax-M3",
+            name: "MiniMax M3",
+            reasoning: true,
+            input: ["text", "image"],
+            cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
+            contextWindow: 512000,
+            maxTokens: 128000,
+          },
+          {
             id: "MiniMax-M2.7",
             name: "MiniMax M2.7",
             reasoning: true,
             input: ["text"],
             cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
-            contextWindow: 200000,
-            maxTokens: 8192,
-          },
-          {
-            id: "MiniMax-M2.7-highspeed",
-            name: "MiniMax M2.7 Highspeed",
-            reasoning: true,
-            input: ["text"],
-            cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
-            contextWindow: 200000,
-            maxTokens: 8192,
+            contextWindow: 192000,
+            maxTokens: 65536,
           },
         ],
       },
@@ -101,9 +103,9 @@ Configure via CLI:
 }
 ```
 
-### MiniMax M2.7 as fallback (example)
+### MiniMax M3 as fallback (example)
 
-**Best for:** keep your strongest latest-generation model as primary, fail over to MiniMax M2.7.
+**Best for:** keep your strongest latest-generation model as primary, fail over to MiniMax M3.
 Example below uses Opus as a concrete primary; swap to your preferred latest-gen primary model.
 
 ```json5
@@ -113,11 +115,11 @@ Example below uses Opus as a concrete primary; swap to your preferred latest-gen
     defaults: {
       models: {
         "anthropic/claude-opus-4-6": { alias: "primary" },
-        "minimax/MiniMax-M2.7": { alias: "minimax" },
+        "minimax/MiniMax-M3": { alias: "minimax" },
       },
       model: {
         primary: "anthropic/claude-opus-4-6",
-        fallbacks: ["minimax/MiniMax-M2.7"],
+        fallbacks: ["minimax/MiniMax-M3"],
       },
     },
   },
@@ -170,7 +172,7 @@ Use the interactive config wizard to set MiniMax without editing JSON:
 
 1. Run `openclaw configure`.
 2. Select **Model/auth**.
-3. Choose **MiniMax M2.7**.
+3. Choose **MiniMax M3**.
 4. Pick your default model when prompted.
 
 ## Configuration options
@@ -185,34 +187,30 @@ Use the interactive config wizard to set MiniMax without editing JSON:
 ## Notes
 
 - Model refs are `minimax/<model>`.
-- Recommended model IDs: `MiniMax-M2.7` and `MiniMax-M2.7-highspeed`.
-- Legacy model IDs (`MiniMax-M2.5`, `MiniMax-M2.5-highspeed`, `MiniMax-M2.5-Lightning`) are still supported.
+- Recommended model IDs: `MiniMax-M3` (latest flagship) and `MiniMax-M2.7` (previous flagship).
 - Coding Plan usage API: `https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains` (requires a coding plan key).
 - Update pricing values in `models.json` if you need exact cost tracking.
 - Referral link for MiniMax Coding Plan (10% off): [https://platform.minimax.io/subscribe/coding-plan?code=DbXJTRClnb&source=link](https://platform.minimax.io/subscribe/coding-plan?code=DbXJTRClnb&source=link)
 - See [/concepts/model-providers](/concepts/model-providers) for provider rules.
-- Use `openclaw models list` and `openclaw models set minimax/MiniMax-M2.7` to switch.
+- Use `openclaw models list` and `openclaw models set minimax/MiniMax-M3` to switch.
 
 ## Troubleshooting
 
-### "Unknown model: minimax/MiniMax-M2.7"
+### "Unknown model: minimax/MiniMax-M3"
 
 This usually means the **MiniMax provider isn't configured** (no provider entry
 and no MiniMax auth profile/env key found). A fix for this detection is in
 **2026.1.12** (unreleased at the time of writing). Fix by:
 
 - Upgrading to **2026.1.12** (or run from source `main`), then restarting the gateway.
-- Running `openclaw configure` and selecting **MiniMax M2.7**, or
+- Running `openclaw configure` and selecting **MiniMax M3**, or
 - Adding the `models.providers.minimax` block manually, or
 - Setting `MINIMAX_API_KEY` (or a MiniMax auth profile) so the provider can be injected.
 
 Make sure the model id is **case‑sensitive**:
 
+- `minimax/MiniMax-M3`
 - `minimax/MiniMax-M2.7`
-- `minimax/MiniMax-M2.7-highspeed`
-- `minimax/MiniMax-M2.5` (legacy)
-- `minimax/MiniMax-M2.5-highspeed` (legacy)
-- `minimax/MiniMax-M2.5-Lightning` (legacy)
 
 Then recheck with:
 

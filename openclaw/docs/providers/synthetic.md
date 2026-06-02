@@ -23,7 +23,7 @@ openclaw onboard --auth-choice synthetic-api-key
 The default model is set to:
 
 ```
-synthetic/hf:MiniMaxAI/MiniMax-M2.5
+synthetic/hf:MiniMaxAI/MiniMax-M3
 ```
 
 ## Config example
@@ -33,8 +33,8 @@ synthetic/hf:MiniMaxAI/MiniMax-M2.5
   env: { SYNTHETIC_API_KEY: "sk-..." },
   agents: {
     defaults: {
-      model: { primary: "synthetic/hf:MiniMaxAI/MiniMax-M2.5" },
-      models: { "synthetic/hf:MiniMaxAI/MiniMax-M2.5": { alias: "MiniMax M2.5" } },
+      model: { primary: "synthetic/hf:MiniMaxAI/MiniMax-M3" },
+      models: { "synthetic/hf:MiniMaxAI/MiniMax-M3": { alias: "MiniMax M3" } },
     },
   },
   models: {
@@ -46,13 +46,13 @@ synthetic/hf:MiniMaxAI/MiniMax-M2.5
         api: "anthropic-messages",
         models: [
           {
-            id: "hf:MiniMaxAI/MiniMax-M2.5",
-            name: "MiniMax M2.5",
-            reasoning: false,
-            input: ["text"],
+            id: "hf:MiniMaxAI/MiniMax-M3",
+            name: "MiniMax M3",
+            reasoning: true,
+            input: ["text", "image"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 192000,
-            maxTokens: 65536,
+            contextWindow: 512000,
+            maxTokens: 128000,
           },
         ],
       },
@@ -71,7 +71,8 @@ All models below use cost `0` (input/output/cache).
 
 | Model ID                                               | Context window | Max tokens | Reasoning | Input        |
 | ------------------------------------------------------ | -------------- | ---------- | --------- | ------------ |
-| `hf:MiniMaxAI/MiniMax-M2.5`                            | 192000         | 65536      | false     | text         |
+| `hf:MiniMaxAI/MiniMax-M3`                              | 512000         | 128000     | true      | text + image |
+| `hf:MiniMaxAI/MiniMax-M2.7`                            | 192000         | 65536      | false     | text         |
 | `hf:moonshotai/Kimi-K2-Thinking`                       | 256000         | 8192       | true      | text         |
 | `hf:zai-org/GLM-4.7`                                   | 198000         | 128000     | false     | text         |
 | `hf:deepseek-ai/DeepSeek-R1-0528`                      | 128000         | 8192       | false     | text         |

@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   }
 
   const minimaxBaseUrl = process.env.MINIMAX_BASE_URL?.trim() || "https://api.minimax.io/v1";
-  const minimaxModelId = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7";
+  const minimaxModelId = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
   const minimaxModel: Model<"openai-completions"> = {
     id: minimaxModelId,
@@ -103,8 +103,8 @@ async function main(): Promise<void> {
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 200000,
-    maxTokens: 8192,
+    contextWindow: 512000,
+    maxTokens: 128000,
   };
   const opusModel = getModel("anthropic", "claude-opus-4-6");
 

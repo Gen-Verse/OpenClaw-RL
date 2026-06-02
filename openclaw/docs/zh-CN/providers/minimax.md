@@ -2,10 +2,10 @@
 read_when:
   - 你想在 OpenClaw 中使用 MiniMax 模型
   - 你需要 MiniMax 设置指南
-summary: 在 OpenClaw 中使用 MiniMax M2.7
+summary: 在 OpenClaw 中使用 MiniMax M3
 title: MiniMax
 x-i18n:
-  generated_at: "2026-03-18T00:00:00Z"
+  generated_at: "2026-06-03T00:00:00Z"
   model: claude-opus-4-6
   provider: pi
   source_hash: updated
@@ -15,25 +15,26 @@ x-i18n:
 
 # MiniMax
 
-MiniMax 是一家构建 **M2/M2.5/M2.7** 模型系列的 AI 公司。当前最新的旗舰模型是 **MiniMax M2.7**，具备增强的推理和编程能力。
+MiniMax 是一家构建 **M2/M2.7/M3** 模型系列的 AI 公司。当前最新的旗舰模型是 **MiniMax M3**，具备增强的推理、编程和图像输入能力（512K 上下文，128K 最大输出）。
 
-## 模型概述（M2.7）
+## 模型概述（M3）
 
-MiniMax M2.7 在 M2.5 基础上进行了关键改进：
+MiniMax M3 在 M2.7 基础上进行了关键改进：
 
 - 增强的**推理和编程**能力，覆盖所有支持的语言。
 - 更强的**多语言编程**能力（Rust、Java、Go、C++、Kotlin、Objective-C、TS/JS）。
 - 更好的 **Web/应用开发**和美观输出质量（包括原生移动端）。
+- **原生图像输入**支持视觉工作流。
+- **512K 上下文窗口**和 **128K 最大输出**，支持更长、更复杂的任务。
 - 改进的**复合指令**处理，适用于办公风格的工作流程，基于交错思考和集成约束执行。
 - **更简洁的响应**，更低的 token 使用量和更快的迭代循环。
 - 更强的**工具/智能体框架**兼容性和上下文管理（Claude Code、Droid/Factory AI、Cline、Kilo Code、Roo Code、BlackBox）。
 - 更高质量的**对话和技术写作**输出。
 
-## MiniMax M2.7 vs MiniMax M2.7 Highspeed
+## MiniMax M3 vs MiniMax M2.7
 
-- **速度：** `MiniMax-M2.7-highspeed` 是面向低延迟场景的官方快速版本。
-- **成本：** 定价显示相同的输入成本，但 Highspeed 的输出成本更高。
-- **兼容性：** OpenClaw 仍然接受旧版 `MiniMax-M2.5`、`MiniMax-M2.5-highspeed` 和 `MiniMax-M2.5-Lightning` 配置，但新设置推荐使用 `MiniMax-M2.7`。
+- **能力：** M3 新增图像输入和更大的上下文（512K vs 192K）。
+- **兼容性：** OpenClaw 同时支持 `MiniMax-M3` 和 `MiniMax-M2.7`，新设置推荐使用 `MiniMax-M3`。
 
 ## 选择设置方式
 
@@ -56,7 +57,7 @@ openclaw onboard --auth-choice minimax-portal
 
 详情参见 [MiniMax OAuth 插件 README](https://github.com/openclaw/openclaw/tree/main/extensions/minimax-portal-auth)。
 
-### MiniMax M2.7（API 密钥）
+### MiniMax M3（API 密钥）
 
 **适用于：** 使用 Anthropic 兼容 API 的托管 MiniMax。
 
@@ -64,12 +65,12 @@ openclaw onboard --auth-choice minimax-portal
 
 - 运行 `openclaw configure`
 - 选择 **Model/auth**
-- 选择 **MiniMax M2.7**
+- 选择 **MiniMax M3**
 
 ```json5
 {
   env: { MINIMAX_API_KEY: "sk-..." },
-  agents: { defaults: { model: { primary: "minimax/MiniMax-M2.7" } } },
+  agents: { defaults: { model: { primary: "minimax/MiniMax-M3" } } },
   models: {
     mode: "merge",
     providers: {
@@ -79,22 +80,22 @@ openclaw onboard --auth-choice minimax-portal
         api: "anthropic-messages",
         models: [
           {
+            id: "MiniMax-M3",
+            name: "MiniMax M3",
+            reasoning: true,
+            input: ["text", "image"],
+            cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
+            contextWindow: 512000,
+            maxTokens: 128000,
+          },
+          {
             id: "MiniMax-M2.7",
             name: "MiniMax M2.7",
             reasoning: true,
             input: ["text"],
             cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
-            contextWindow: 200000,
-            maxTokens: 8192,
-          },
-          {
-            id: "MiniMax-M2.7-highspeed",
-            name: "MiniMax M2.7 Highspeed",
-            reasoning: true,
-            input: ["text"],
-            cost: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.12 },
-            contextWindow: 200000,
-            maxTokens: 8192,
+            contextWindow: 192000,
+            maxTokens: 65536,
           },
         ],
       },
@@ -103,9 +104,9 @@ openclaw onboard --auth-choice minimax-portal
 }
 ```
 
-### MiniMax M2.7 作为备用（示例）
+### MiniMax M3 作为备用（示例）
 
-**适用于：** 保持最强模型为主模型，故障时切换到 MiniMax M2.7。
+**适用于：** 保持最强模型为主模型，故障时切换到 MiniMax M3。
 
 ```json5
 {
@@ -114,11 +115,11 @@ openclaw onboard --auth-choice minimax-portal
     defaults: {
       models: {
         "anthropic/claude-opus-4-6": { alias: "primary" },
-        "minimax/MiniMax-M2.7": { alias: "minimax" },
+        "minimax/MiniMax-M3": { alias: "minimax" },
       },
       model: {
         primary: "anthropic/claude-opus-4-6",
-        fallbacks: ["minimax/MiniMax-M2.7"],
+        fallbacks: ["minimax/MiniMax-M3"],
       },
     },
   },
@@ -170,7 +171,7 @@ openclaw onboard --auth-choice minimax-portal
 
 1. 运行 `openclaw configure`。
 2. 选择 **Model/auth**。
-3. 选择 **MiniMax M2.7**。
+3. 选择 **MiniMax M3**。
 4. 在提示时选择你的默认模型。
 
 ## 配置选项
@@ -185,32 +186,28 @@ openclaw onboard --auth-choice minimax-portal
 ## 注意事项
 
 - 模型引用格式为 `minimax/<model>`。
-- 推荐模型 ID：`MiniMax-M2.7` 和 `MiniMax-M2.7-highspeed`。
-- 旧版模型 ID（`MiniMax-M2.5`、`MiniMax-M2.5-highspeed`、`MiniMax-M2.5-Lightning`）仍然受支持。
+- 推荐模型 ID：`MiniMax-M3`（最新旗舰）和 `MiniMax-M2.7`（上一代旗舰）。
 - 编程计划使用量 API：`https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains`（需要编程计划密钥）。
 - 如果需要精确的成本跟踪，请更新 `models.json` 中的定价值。
 - MiniMax 编程计划推荐链接（9 折优惠）：https://platform.minimax.io/subscribe/coding-plan?code=DbXJTRClnb&source=link
 - 参见 [/concepts/model-providers](/concepts/model-providers) 了解提供商规则。
-- 使用 `openclaw models list` 和 `openclaw models set minimax/MiniMax-M2.7` 切换模型。
+- 使用 `openclaw models list` 和 `openclaw models set minimax/MiniMax-M3` 切换模型。
 
 ## 故障排除
 
-### "Unknown model: minimax/MiniMax-M2.7"
+### "Unknown model: minimax/MiniMax-M3"
 
 这通常意味着 **MiniMax 提供商未配置**（没有提供商条目，也没有找到 MiniMax 认证配置文件/环境变量密钥）。此检测的修复在 **2026.1.12** 中（撰写本文时尚未发布）。修复方法：
 
 - 升级到 **2026.1.12**（或从源码 `main` 分支运行），然后重启 Gateway 网关。
-- 运行 `openclaw configure` 并选择 **MiniMax M2.7**，或
+- 运行 `openclaw configure` 并选择 **MiniMax M3**，或
 - 手动添加 `models.providers.minimax` 块，或
 - 设置 `MINIMAX_API_KEY`（或 MiniMax 认证配置文件）以便注入提供商。
 
 确保模型 id **区分大小写**：
 
+- `minimax/MiniMax-M3`
 - `minimax/MiniMax-M2.7`
-- `minimax/MiniMax-M2.7-highspeed`
-- `minimax/MiniMax-M2.5`（旧版）
-- `minimax/MiniMax-M2.5-highspeed`（旧版）
-- `minimax/MiniMax-M2.5-Lightning`（旧版）
 
 然后重新检查：
 

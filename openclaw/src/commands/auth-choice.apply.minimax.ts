@@ -111,8 +111,7 @@ export async function applyAuthChoiceMiniMax(
       provider: "minimax",
       promptMessage: "Enter MiniMax API key",
       modelRefPrefix: "minimax",
-      modelId:
-        params.authChoice === "minimax-api-lightning" ? "MiniMax-M2.7-highspeed" : "MiniMax-M2.7",
+      modelId: params.authChoice === "minimax-api-lightning" ? "MiniMax-M2.7" : "MiniMax-M3",
       applyDefaultConfig: applyMinimaxApiConfig,
       applyProviderConfig: applyMinimaxApiProviderConfig,
     });
@@ -124,7 +123,7 @@ export async function applyAuthChoiceMiniMax(
       provider: "minimax-cn",
       promptMessage: "Enter MiniMax China API key",
       modelRefPrefix: "minimax-cn",
-      modelId: "MiniMax-M2.7",
+      modelId: "MiniMax-M3",
       applyDefaultConfig: applyMinimaxApiConfigCn,
       applyProviderConfig: applyMinimaxApiProviderConfigCn,
     });

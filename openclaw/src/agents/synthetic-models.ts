@@ -1,7 +1,7 @@
 import type { ModelDefinitionConfig } from "../config/types.js";
 
 export const SYNTHETIC_BASE_URL = "https://api.synthetic.new/anthropic";
-export const SYNTHETIC_DEFAULT_MODEL_ID = "hf:MiniMaxAI/MiniMax-M2.7";
+export const SYNTHETIC_DEFAULT_MODEL_ID = "hf:MiniMaxAI/MiniMax-M3";
 export const SYNTHETIC_DEFAULT_MODEL_REF = `synthetic/${SYNTHETIC_DEFAULT_MODEL_ID}`;
 export const SYNTHETIC_DEFAULT_COST = {
   input: 0,
@@ -13,6 +13,14 @@ export const SYNTHETIC_DEFAULT_COST = {
 export const SYNTHETIC_MODEL_CATALOG = [
   {
     id: SYNTHETIC_DEFAULT_MODEL_ID,
+    name: "MiniMax M3",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 512000,
+    maxTokens: 128000,
+  },
+  {
+    id: "hf:MiniMaxAI/MiniMax-M2.7",
     name: "MiniMax M2.7",
     reasoning: false,
     input: ["text"],
@@ -22,14 +30,6 @@ export const SYNTHETIC_MODEL_CATALOG = [
   {
     id: "hf:MiniMaxAI/MiniMax-M2.7-highspeed",
     name: "MiniMax M2.7 Highspeed",
-    reasoning: false,
-    input: ["text"],
-    contextWindow: 192000,
-    maxTokens: 65536,
-  },
-  {
-    id: "hf:MiniMaxAI/MiniMax-M2.5",
-    name: "MiniMax M2.5",
     reasoning: false,
     input: ["text"],
     contextWindow: 192000,
