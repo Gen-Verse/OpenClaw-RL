@@ -53,3 +53,4 @@ source .venv/bin/activate
 uv pip install terminal-bench
 uv pip install camel-ai
 uv pip install fastapi
+uv pip install uvicorn
