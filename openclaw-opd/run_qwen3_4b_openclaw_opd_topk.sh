@@ -11,7 +11,7 @@ pkill -9 python
 
 set -ex
 
-export PYTHONBUFFERED=16
+export PYTHONUNBUFFERED=1
 
 NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
