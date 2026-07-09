@@ -34,11 +34,36 @@ class Qwen35Bridge(Qwen3NextBridge):
         "mlp.linear_fc2.weight": ["model.layers.{layer_number}.mlp.down_proj.weight"],
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.full_hf_config = self.hf_config
-        if hasattr(self.hf_config, "text_config"):
-            self.hf_config = self.hf_config.text_config
+    def __init__(self, hf_config, *args, **kwargs):
+        self.full_hf_config = hf_config
+        self._hf_text_weight_prefix = "model.language_model" if hasattr(hf_config, "text_config") else None
+        if hasattr(hf_config, "text_config"):
+            hf_config = hf_config.text_config
+        super().__init__(hf_config, *args, **kwargs)
+
+    def _prefix_hf_weight_name(self, name: str) -> str:
+        if self._hf_text_weight_prefix is None:
+            return name
+        if name.startswith("model."):
+            return f"{self._hf_text_weight_prefix}.{name[len('model.'):]}"
+        if name == "lm_head.weight":
+            return f"{self._hf_text_weight_prefix}.lm_head.weight"
+        return name
+
+    def _adjust_mapping_for_shared_weights(self):
+        if getattr(self.hf_config, "tie_word_embeddings", False):
+            self._DIRECT_MAPPING["output_layer.weight"] = "model.embed_tokens.weight"
+
+    def _get_hf_shared_weight_keys(self):
+        if getattr(self.hf_config, "tie_word_embeddings", False):
+            return [self._prefix_hf_weight_name("model.embed_tokens.weight")]
+        return []
+
+    def _weight_name_mapping_mcore_to_hf(self, mcore_weights_name: str) -> list[str]:
+        return [
+            self._prefix_hf_weight_name(name)
+            for name in super()._weight_name_mapping_mcore_to_hf(mcore_weights_name)
+        ]
 
     def _build_config(self):
         mtp_args = {}
