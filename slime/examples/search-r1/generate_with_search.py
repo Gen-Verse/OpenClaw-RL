@@ -2,6 +2,7 @@
 # This is a unified version supporting both local search and Google search, with optional log probability collection
 
 import asyncio
+import os
 import re
 
 from qa_em_format import compute_score_em
@@ -17,7 +18,7 @@ SEARCH_R1_CONFIGS = {
     "topk": 3,
     "search_concurrency": 256,
     # ============== Search Backend Selection ==============
-    "search_backend": "local",  # Options: "local" or "google"
+    "search_backend": "local",  # Options: "local", "google", or "tavily"
     # ============== Local Search Configuration ==============
     # (Only used when search_backend="local")
     "local": {
@@ -30,6 +31,12 @@ SEARCH_R1_CONFIGS = {
         "api_key": "your_api_key_here",  # Replace with your actual API key
         "snippet_only": True,  # Set to True to only return snippets
         "proxy": None,  # Set to your proxy if needed
+    },
+    # ============== Tavily Search Configuration ==============
+    # (Only used when search_backend="tavily")
+    "tavily": {
+        "api_key": os.environ.get("TAVILY_API_KEY", ""),  # Or set explicitly
+        "search_depth": "basic",  # Options: "basic" or "advanced"
     },
     # ============== Log Probability Collection ==============
     "return_logprob": True,  # Set to True to collect log probabilities for TIS metrics
@@ -84,8 +91,18 @@ async def search(query: str) -> str:
             snippet_only=google_config["snippet_only"],
             proxy=google_config["proxy"],
         )
+    elif backend == "tavily":
+        from tavily_search_server import tavily_search
+
+        tavily_config = SEARCH_R1_CONFIGS["tavily"]
+        result = await tavily_search(
+            query,
+            top_k=SEARCH_R1_CONFIGS["topk"],
+            search_depth=tavily_config["search_depth"],
+            api_key=tavily_config["api_key"],
+        )
     else:
-        raise ValueError(f"Unknown search backend: {backend}. " f"Must be either 'local' or 'google'.")
+        raise ValueError(f"Unknown search backend: {backend}. " f"Must be 'local', 'google', or 'tavily'.")
 
     return _passages2string(result)
 

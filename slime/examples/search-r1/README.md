@@ -62,7 +62,7 @@ PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
 
 ### Search Backend Configuration
 
-The `generate_with_search.py` file supports both **local search** and **Google search** backends. Configure via the `SEARCH_R1_CONFIGS` dictionary:
+The `generate_with_search.py` file supports **local search**, **Google search**, and **Tavily search** backends. Configure via the `SEARCH_R1_CONFIGS` dictionary:
 
 ```python
 SEARCH_R1_CONFIGS = {
@@ -72,7 +72,7 @@ SEARCH_R1_CONFIGS = {
     "search_concurrency": 256,
 
     # ============== Search Backend Selection ==============
-    "search_backend": "local",  # Options: "local" or "google"
+    "search_backend": "local",  # Options: "local", "google", or "tavily"
 
     # ============== Local Search Configuration ==============
     # (Only used when search_backend="local")
@@ -87,6 +87,13 @@ SEARCH_R1_CONFIGS = {
         "api_key": "your_api_key_here",  # Replace with your actual serper.dev API key
         "snippet_only": True,
         "proxy": None,
+    },
+
+    # ============== Tavily Search Configuration ==============
+    # (Only used when search_backend="tavily")
+    "tavily": {
+        "api_key": os.environ.get("TAVILY_API_KEY", ""),
+        "search_depth": "basic",  # Options: "basic" or "advanced"
     },
 
     # ============== Log Probability Collection ==============
@@ -108,6 +115,13 @@ SEARCH_R1_CONFIGS = {
 1. Set `"search_backend": "google"`
 2. Configure `"google"` section with your serper.dev API key
 3. Get your API key from [serper.dev](https://serper.dev)
+
+#### Using Tavily Search
+
+1. Set `"search_backend": "tavily"`
+2. Set `TAVILY_API_KEY` environment variable, or configure `"tavily"` section with your API key
+3. Get your API key from [app.tavily.com](https://app.tavily.com)
+4. Install the Tavily Python SDK: `pip install tavily-python`
 
 ### Enabling TIS (Trajectory Importance Sampling)
 
