@@ -19,7 +19,7 @@ export const MINIMAX_API_BASE_URL = "https://api.minimax.io/anthropic";
 export const MINIMAX_CN_API_BASE_URL = "https://api.minimaxi.com/anthropic";
 export const MINIMAX_HOSTED_MODEL_ID = "MiniMax-M3";
 export const MINIMAX_HOSTED_MODEL_REF = `minimax/${MINIMAX_HOSTED_MODEL_ID}`;
-export const DEFAULT_MINIMAX_CONTEXT_WINDOW = 512000;
+export const DEFAULT_MINIMAX_CONTEXT_WINDOW = 1000000;
 export const DEFAULT_MINIMAX_MAX_TOKENS = 128000;
 
 export const MOONSHOT_BASE_URL = "https://api.moonshot.ai/v1";
@@ -57,10 +57,10 @@ export function resolveZaiBaseUrl(endpoint?: string): string {
 
 // Pricing per 1M tokens (USD) — https://platform.minimaxi.com/document/Price
 export const MINIMAX_API_COST = {
-  input: 0.3,
-  output: 1.2,
-  cacheRead: 0.03,
-  cacheWrite: 0.12,
+  input: 0.6,
+  output: 2.4,
+  cacheRead: 0.12,
+  cacheWrite: 0,
 };
 export const MINIMAX_HOSTED_COST = {
   input: 0,
@@ -89,8 +89,20 @@ export const ZAI_DEFAULT_COST = {
 };
 
 const MINIMAX_MODEL_CATALOG = {
-  "MiniMax-M3": { name: "MiniMax M3", reasoning: true },
-  "MiniMax-M2.7": { name: "MiniMax M2.7", reasoning: true },
+  "MiniMax-M3": {
+    name: "MiniMax M3",
+    reasoning: true,
+    input: ["text", "image"] as Array<"text" | "image">,
+    cost: MINIMAX_API_COST,
+    contextWindow: 1000000,
+  },
+  "MiniMax-M2.7": {
+    name: "MiniMax M2.7",
+    reasoning: true,
+    input: ["text"] as Array<"text" | "image">,
+    cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
+    contextWindow: 204800,
+  },
 } as const;
 
 type MinimaxCatalogId = keyof typeof MINIMAX_MODEL_CATALOG;
@@ -117,9 +129,9 @@ export function buildMinimaxModelDefinition(params: {
     id: params.id,
     name: params.name ?? catalog?.name ?? `MiniMax ${params.id}`,
     reasoning: params.reasoning ?? catalog?.reasoning ?? false,
-    input: ["text"],
-    cost: params.cost,
-    contextWindow: params.contextWindow,
+    input: catalog?.input ?? ["text"],
+    cost: catalog?.cost ?? params.cost,
+    contextWindow: catalog?.contextWindow ?? params.contextWindow,
     maxTokens: params.maxTokens,
   };
 }

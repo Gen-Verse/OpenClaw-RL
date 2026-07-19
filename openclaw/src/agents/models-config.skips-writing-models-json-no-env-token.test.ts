@@ -17,7 +17,13 @@ installModelsConfigTestHooks();
 type ProviderConfig = {
   baseUrl?: string;
   apiKey?: string;
-  models?: Array<{ id: string }>;
+  models?: Array<{
+    id: string;
+    reasoning: boolean;
+    input: string[];
+    cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    contextWindow: number;
+  }>;
 };
 
 async function runEnvProviderCase(params: {
@@ -99,6 +105,24 @@ describe("models-config", () => {
         expectedBaseUrl: "https://api.minimax.io/anthropic",
         expectedApiKeyRef: "MINIMAX_API_KEY",
         expectedModelIds: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-VL-01"],
+      });
+
+      const modelPath = path.join(resolveOpenClawAgentDir(), "models.json");
+      const parsed = JSON.parse(await fs.readFile(modelPath, "utf8")) as {
+        providers: Record<string, ProviderConfig>;
+      };
+      const models = parsed.providers.minimax?.models ?? [];
+      expect(models.find((model) => model.id === "MiniMax-M3")).toMatchObject({
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: 0 },
+        contextWindow: 1_000_000,
+      });
+      expect(models.find((model) => model.id === "MiniMax-M2.7")).toMatchObject({
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
+        contextWindow: 204_800,
       });
     });
   });

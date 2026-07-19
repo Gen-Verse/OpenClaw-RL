@@ -60,15 +60,15 @@ export type ProviderConfig = NonNullable<ModelsConfig["providers"]>[string];
 const MINIMAX_PORTAL_BASE_URL = "https://api.minimax.io/anthropic";
 const MINIMAX_DEFAULT_MODEL_ID = "MiniMax-M3";
 const MINIMAX_DEFAULT_VISION_MODEL_ID = "MiniMax-VL-01";
-const MINIMAX_DEFAULT_CONTEXT_WINDOW = 512000;
+const MINIMAX_DEFAULT_CONTEXT_WINDOW = 1000000;
 const MINIMAX_DEFAULT_MAX_TOKENS = 128000;
 const MINIMAX_OAUTH_PLACEHOLDER = "minimax-oauth";
 // Pricing per 1M tokens (USD) — https://platform.minimaxi.com/document/Price
 const MINIMAX_API_COST = {
-  input: 0.3,
-  output: 1.2,
-  cacheRead: 0.03,
-  cacheWrite: 0.12,
+  input: 0.6,
+  output: 2.4,
+  cacheRead: 0.12,
+  cacheWrite: 0,
 };
 
 type ProviderModelConfig = NonNullable<ProviderConfig["models"]>[number];
@@ -78,14 +78,16 @@ function buildMinimaxModel(params: {
   name: string;
   reasoning: boolean;
   input: ProviderModelConfig["input"];
+  cost?: ProviderModelConfig["cost"];
+  contextWindow?: number;
 }): ProviderModelConfig {
   return {
     id: params.id,
     name: params.name,
     reasoning: params.reasoning,
     input: params.input,
-    cost: MINIMAX_API_COST,
-    contextWindow: MINIMAX_DEFAULT_CONTEXT_WINDOW,
+    cost: params.cost ?? MINIMAX_API_COST,
+    contextWindow: params.contextWindow ?? MINIMAX_DEFAULT_CONTEXT_WINDOW,
     maxTokens: MINIMAX_DEFAULT_MAX_TOKENS,
   };
 }
@@ -94,6 +96,8 @@ function buildMinimaxTextModel(params: {
   id: string;
   name: string;
   reasoning: boolean;
+  cost?: ProviderModelConfig["cost"];
+  contextWindow?: number;
 }): ProviderModelConfig {
   return buildMinimaxModel({ ...params, input: ["text"] });
 }
@@ -595,6 +599,8 @@ function buildMinimaxProvider(): ProviderConfig {
         id: "MiniMax-M2.7",
         name: "MiniMax M2.7",
         reasoning: true,
+        cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
+        contextWindow: 204800,
       }),
       buildMinimaxModel({
         id: MINIMAX_DEFAULT_VISION_MODEL_ID,
@@ -622,6 +628,8 @@ function buildMinimaxPortalProvider(): ProviderConfig {
         id: "MiniMax-M2.7",
         name: "MiniMax M2.7",
         reasoning: true,
+        cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
+        contextWindow: 204800,
       }),
     ],
   };
