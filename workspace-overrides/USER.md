@@ -1,13 +1,5 @@
-# USER.md - About Your Human
+# USER.md
 
 - **Name:** Marceli
-- **What to call them:** Marceli
-- **Pronouns:** -
 - **Timezone:** Europe/Warsaw
-- **Notes:** Building autonomous AI systems
-
-## Context
-
-- Working on OpenClaw autonomous control
-- Wants direct, no-nonsense assistance
-- Prefers action over discussion
+- **Notes:** Building autonomous systems. Prefers action over discussion.

@@ -1,15 +1,14 @@
-import asyncio
+from __future__ import annotations
+
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
-from .gateway_client import GatewayClient
-
-logger = logging.getLogger("openclaw.autonomous.tasks")
+log = logging.getLogger("openclaw.puppet.tasks")
 
 
 @dataclass
@@ -26,125 +25,83 @@ class Task:
     last_result: str = ""
 
     def is_due(self) -> bool:
-        if not self.enabled:
-            return False
-        return time.time() >= self.next_run
+        return self.enabled and time.time() >= self.next_run
 
 
 class TaskManager:
-    def __init__(self, client: GatewayClient, task_dir: str):
-        self.client = client
-        self.task_dir = task_dir
+    def __init__(self, send_fn: Callable, task_dir: str) -> None:
+        self._send = send_fn
+        self.dir = Path(task_dir)
+        self.dir.mkdir(parents=True, exist_ok=True)
         self.tasks: dict[str, Task] = {}
         self._handlers: dict[str, Callable] = {}
-        os.makedirs(task_dir, exist_ok=True)
-        self._load_tasks()
+        self._load()
 
-    def _load_tasks(self) -> None:
-        for f in Path(self.task_dir).glob("*.json"):
+    def _load(self) -> None:
+        for f in self.dir.glob("*.json"):
             try:
-                data = json.loads(f.read_text())
-                task = Task(**data)
-                self.tasks[task.id] = task
-                logger.info("Loaded task: %s (%s)", task.name, task.id)
+                t = Task(**json.loads(f.read_text()))
+                self.tasks[t.id] = t
             except Exception:
-                logger.exception("Failed to load task: %s", f.name)
+                log.exception("skip %s", f.name)
 
-    def _save_task(self, task: Task) -> None:
-        path = Path(self.task_dir) / f"{task.id}.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "id": task.id,
-                    "name": task.name,
-                    "command": task.command,
-                    "args": task.args,
-                    "interval": task.interval,
-                    "next_run": task.next_run,
-                    "last_run": task.last_run,
-                    "enabled": task.enabled,
-                    "run_count": task.run_count,
-                    "last_result": task.last_result,
-                },
-                indent=2,
-            )
-        )
+    def _save(self, t: Task) -> None:
+        (self.dir / f"{t.id}.json").write_text(json.dumps({
+            "id": t.id, "name": t.name, "command": t.command, "args": t.args,
+            "interval": t.interval, "next_run": t.next_run, "last_run": t.last_run,
+            "enabled": t.enabled, "run_count": t.run_count, "last_result": t.last_result,
+        }, indent=2))
 
-    def register_handler(self, command: str, handler: Callable) -> None:
+    def on(self, command: str, handler: Callable) -> None:
         self._handlers[command] = handler
 
-    def add_task(
-        self,
-        name: str,
-        command: str,
-        args: dict | None = None,
-        interval: int = 60,
-        enabled: bool = True,
-    ) -> Task:
-        task_id = f"task-{len(self.tasks) + 1:04d}"
-        task = Task(
-            id=task_id,
-            name=name,
-            command=command,
-            args=args or {},
-            interval=interval,
-            next_run=time.time() + interval,
-            enabled=enabled,
-        )
-        self.tasks[task_id] = task
-        self._save_task(task)
-        logger.info("Added task: %s (%s)", name, task_id)
-        return task
+    def add(self, name: str, command: str, args: dict | None = None, interval: int = 60) -> Task:
+        tid = f"task-{len(self.tasks) + 1:04d}"
+        t = Task(id=tid, name=name, command=command, args=args or {},
+                 interval=interval, next_run=time.time() + interval)
+        self.tasks[tid] = t
+        self._save(t)
+        log.info("added %s (%s)", name, tid)
+        return t
 
-    def remove_task(self, task_id: str) -> bool:
-        if task_id in self.tasks:
-            del self.tasks[task_id]
-            path = Path(self.task_dir) / f"{task_id}.json"
-            if path.exists():
-                path.unlink()
-            logger.info("Removed task: %s", task_id)
+    def remove(self, tid: str) -> bool:
+        t = self.tasks.pop(tid, None)
+        if t:
+            p = self.dir / f"{tid}.json"
+            p.unlink(missing_ok=True)
             return True
         return False
 
-    async def execute_task(self, task: Task) -> str:
-        handler = self._handlers.get(task.command)
+    async def run(self, t: Task) -> str:
+        handler = self._handlers.get(t.command)
         if handler:
             try:
-                result = await handler(task)
-                task.last_result = str(result)
+                result = await handler(t)
+                t.last_result = str(result)
             except Exception as e:
-                task.last_result = f"ERROR: {e}"
-                logger.exception("Task %s failed", task.id)
+                t.last_result = f"ERROR: {e}"
         else:
-            task.last_result = await self._execute_via_agent(task)
-        task.last_run = time.time()
-        task.run_count += 1
-        if task.interval > 0:
-            task.next_run = time.time() + task.interval
-        self._save_task(task)
-        return task.last_result
-
-    async def _execute_via_agent(self, task: Task) -> str:
-        prompt = task.command
-        if task.args:
-            prompt += " " + json.dumps(task.args)
-        try:
-            reply = await self.client.send_agent_message(prompt)
-            return reply
-        except Exception as e:
-            return f"AGENT_ERROR: {e}"
+            prompt = t.command
+            if t.args:
+                prompt += " " + json.dumps(t.args)
+            try:
+                t.last_result = await self._send(prompt)
+            except Exception as e:
+                t.last_result = f"ERROR: {e}"
+        t.last_run = time.time()
+        t.run_count += 1
+        if t.interval > 0:
+            t.next_run = time.time() + t.interval
+        self._save(t)
+        return t.last_result
 
     async def tick(self) -> list[str]:
-        results = []
-        for task in list(self.tasks.values()):
-            if task.is_due():
-                logger.info("Running task: %s", task.name)
-                result = await self.execute_task(task)
-                results.append(f"{task.name}: {result}")
-        return results
+        out: list[str] = []
+        for t in list(self.tasks.values()):
+            if t.is_due():
+                r = await self.run(t)
+                out.append(f"{t.name}: {r[:200]}")
+        return out
 
-    def list_tasks(self) -> list[Task]:
+    def list_all(self) -> list[Task]:
         return sorted(self.tasks.values(), key=lambda t: t.next_run)
-
-    def get_task(self, task_id: str) -> Task | None:
-        return self.tasks.get(task_id)

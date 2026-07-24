@@ -1,21 +1,43 @@
+from __future__ import annotations
+
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-logger = logging.getLogger("openclaw.puppet.cron")
+log = logging.getLogger("openclaw.puppet.cron")
+
+
+def _parse_schedule(spec: str) -> float:
+    now = time.time()
+    parts = spec.strip().split()
+    if len(parts) == 2 and parts[0].isdigit():
+        val, unit = int(parts[0]), parts[1]
+        multi = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        for suffix, mul in multi.items():
+            if unit.startswith(suffix):
+                return now + val * mul
+    if spec.startswith("daily ") and len(parts) == 2:
+        try:
+            h, m = map(int, parts[1].split(":"))
+            target = datetime.now().replace(hour=h, minute=m, second=0, microsecond=0)
+            if target.timestamp() <= now:
+                target = target.replace(day=target.day + 1)
+            return target.timestamp()
+        except Exception:
+            pass
+    return now + 3600
 
 
 @dataclass
-class CronJob:
+class Job:
     id: str
     name: str
     command: str
-    schedule: str  # "every Ns", "every Nh", "every Nd", "cron expr", "daily HH:MM"
+    schedule: str
     args: dict = field(default_factory=dict)
     enabled: bool = True
     last_run: float = 0
@@ -23,148 +45,92 @@ class CronJob:
     run_count: int = 0
     last_result: str = ""
 
-    def compute_next_run(self) -> float:
-        now = time.time()
-        if self.schedule.startswith("every "):
-            parts = self.schedule.split()
-            if len(parts) == 2:
-                value = int(parts[0])
-                unit = parts[1]
-                if unit.startswith("s"):
-                    return now + value
-                elif unit.startswith("m"):
-                    return now + value * 60
-                elif unit.startswith("h"):
-                    return now + value * 3600
-                elif unit.startswith("d"):
-                    return now + value * 86400
-        elif self.schedule.startswith("daily "):
-            time_str = self.schedule.split()[1]
-            try:
-                h, m = map(int, time_str.split(":"))
-                now_dt = datetime.now()
-                target = now_dt.replace(hour=h, minute=m, second=0, microsecond=0)
-                if target.timestamp() <= now:
-                    target = target.replace(day=target.day + 1)
-                return target.timestamp()
-            except Exception:
-                pass
-        return now + 3600  # fallback: 1 hour
-
     def is_due(self) -> bool:
-        if not self.enabled:
-            return False
-        return time.time() >= self.next_run
+        return self.enabled and time.time() >= self.next_run
 
 
-class CronEngine:
-    def __init__(self, jobs_dir: str):
-        self.jobs_dir = Path(jobs_dir)
-        self.jobs_dir.mkdir(exist_ok=True)
-        self.jobs: dict[str, CronJob] = {}
+class Cron:
+    def __init__(self, jobs_dir: str) -> None:
+        self.dir = Path(jobs_dir)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.jobs: dict[str, Job] = {}
         self._handlers: dict[str, Callable] = {}
-        self._load_jobs()
+        self._load()
 
-    def _load_jobs(self) -> None:
-        for f in self.jobs_dir.glob("*.json"):
+    def _load(self) -> None:
+        for f in self.dir.glob("*.json"):
             try:
-                data = json.loads(f.read_text())
-                job = CronJob(**data)
-                if not job.next_run:
-                    job.next_run = job.compute_next_run()
-                self.jobs[job.id] = job
+                j = Job(**json.loads(f.read_text()))
+                if not j.next_run:
+                    j.next_run = _parse_schedule(j.schedule)
+                self.jobs[j.id] = j
             except Exception:
-                logger.exception("Failed to load cron job: %s", f.name)
+                log.exception("skip %s", f.name)
 
-    def _save_job(self, job: CronJob) -> None:
-        path = self.jobs_dir / f"{job.id}.json"
-        path.write_text(json.dumps({
-            "id": job.id,
-            "name": job.name,
-            "command": job.command,
-            "schedule": job.schedule,
-            "args": job.args,
-            "enabled": job.enabled,
-            "last_run": job.last_run,
-            "next_run": job.next_run,
-            "run_count": job.run_count,
-            "last_result": job.last_result,
+    def _save(self, j: Job) -> None:
+        (self.dir / f"{j.id}.json").write_text(json.dumps({
+            "id": j.id, "name": j.name, "command": j.command, "schedule": j.schedule,
+            "args": j.args, "enabled": j.enabled, "last_run": j.last_run,
+            "next_run": j.next_run, "run_count": j.run_count, "last_result": j.last_result,
         }, indent=2))
 
-    def register_handler(self, command: str, handler: Callable) -> None:
+    def on(self, command: str, handler: Callable) -> None:
         self._handlers[command] = handler
 
-    def add(self, name: str, command: str, schedule: str, args: dict | None = None) -> CronJob:
-        job_id = f"cron-{len(self.jobs) + 1:04d}"
-        job = CronJob(
-            id=job_id,
-            name=name,
-            command=command,
-            schedule=schedule,
-            args=args or {},
-            next_run=CronJob(name=name, command=command, schedule=schedule).compute_next_run(),
-        )
-        self.jobs[job_id] = job
-        self._save_job(job)
-        logger.info("Added cron job: %s (%s) schedule=%s", name, job_id, schedule)
-        return job
+    def add(self, name: str, command: str, schedule: str, args: dict | None = None) -> Job:
+        jid = f"cron-{len(self.jobs) + 1:04d}"
+        j = Job(id=jid, name=name, command=command, schedule=schedule,
+                args=args or {}, next_run=_parse_schedule(schedule))
+        self.jobs[jid] = j
+        self._save(j)
+        return j
 
-    def remove(self, job_id: str) -> bool:
-        if job_id in self.jobs:
-            del self.jobs[job_id]
-            path = self.jobs_dir / f"{job_id}.json"
-            if path.exists():
-                path.unlink()
+    def remove(self, jid: str) -> bool:
+        j = self.jobs.pop(jid, None)
+        if j:
+            (self.dir / f"{jid}.json").unlink(missing_ok=True)
             return True
         return False
 
-    def enable(self, job_id: str) -> bool:
-        if job_id in self.jobs:
-            self.jobs[job_id].enabled = True
-            self._save_job(self.jobs[job_id])
+    def enable(self, jid: str) -> bool:
+        j = self.jobs.get(jid)
+        if j:
+            j.enabled = True
+            self._save(j)
             return True
         return False
 
-    def disable(self, job_id: str) -> bool:
-        if job_id in self.jobs:
-            self.jobs[job_id].enabled = False
-            self._save_job(self.jobs[job_id])
+    def disable(self, jid: str) -> bool:
+        j = self.jobs.get(jid)
+        if j:
+            j.enabled = False
+            self._save(j)
             return True
         return False
 
-    async def execute(self, job: CronJob, executor: Callable | None = None) -> str:
-        handler = self._handlers.get(job.command)
+    async def run(self, j: Job, fallback: Callable | None = None) -> str:
+        handler = self._handlers.get(j.command) or fallback
         if handler:
             try:
-                result = await handler(job)
-                job.last_result = str(result)
+                r = await handler(j)
+                j.last_result = str(r)
             except Exception as e:
-                job.last_result = f"ERROR: {e}"
-        elif executor:
-            try:
-                result = await executor(job)
-                job.last_result = str(result)
-            except Exception as e:
-                job.last_result = f"ERROR: {e}"
+                j.last_result = f"ERROR: {e}"
         else:
-            job.last_result = f"No handler for command: {job.command}"
-        job.last_run = time.time()
-        job.run_count += 1
-        job.next_run = job.compute_next_run()
-        self._save_job(job)
-        return job.last_result
+            j.last_result = f"no handler: {j.command}"
+        j.last_run = time.time()
+        j.run_count += 1
+        j.next_run = _parse_schedule(j.schedule)
+        self._save(j)
+        return j.last_result
 
-    async def tick(self, executor: Callable | None = None) -> list[dict]:
-        results = []
-        for job in list(self.jobs.values()):
-            if job.is_due():
-                logger.info("Cron job due: %s", job.name)
-                result = await self.execute(job, executor)
-                results.append({"job": job.name, "result": result})
-        return results
+    async def tick(self, fallback: Callable | None = None) -> list[dict]:
+        out: list[dict] = []
+        for j in list(self.jobs.values()):
+            if j.is_due():
+                r = await self.run(j, fallback)
+                out.append({"job": j.name, "result": r})
+        return out
 
-    def list_jobs(self) -> list[CronJob]:
+    def list_all(self) -> list[Job]:
         return sorted(self.jobs.values(), key=lambda j: j.next_run)
-
-    def get_job(self, job_id: str) -> CronJob | None:
-        return self.jobs.get(job_id)

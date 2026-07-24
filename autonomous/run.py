@@ -1,180 +1,165 @@
 #!/usr/bin/env python3
+"""OpenClaw Puppet CLI."""
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 
-from .config import AutonomousConfig
-from .controller import PuppetController, setup_logging
+from .config import Config
+from .controller import Puppet, setup_logging
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OpenClaw Puppet Controller")
-    parser.add_argument("--config", help="Config file path")
-    parser.add_argument("--log-level", default="INFO", help="Log level")
-    sub = parser.add_subparsers(dest="command")
+    p = argparse.ArgumentParser(prog="openclaw-puppet", description="OpenClaw Puppet Controller")
+    p.add_argument("--config", help="config file path")
+    p.add_argument("--log-level", default="INFO")
+    sub = p.add_subparsers(dest="cmd")
 
-    sub.add_parser("run", help="Start puppet controller")
-    sub.add_parser("status", help="Show controller status")
-    sub.add_parser("init", help="Initialize workspace")
+    sub.add_parser("run", help="start controller")
+    sub.add_parser("status", help="show status")
+    sub.add_parser("init", help="initialize workspace")
 
-    msg_p = sub.add_parser("send", help="Send a message to the agent")
-    msg_p.add_argument("message", help="Message to send")
+    s = sub.add_parser("send", help="send message to agent")
+    s.add_argument("message")
 
-    mem_p = sub.add_parser("memory", help="Memory operations")
-    mem_sub = mem_p.add_subparsers(dest="mem_cmd")
-    mem_sub.add_parser("today", help="Show today's memory")
-    mem_sub.add_parser("recent", help="Show recent memory")
-    mem_sub.add_parser("long-term", help="Show long-term memory")
-    mem_sub.add_parser("consolidate", help="Consolidate daily to MEMORY.md")
-    s_p = mem_sub.add_parser("search", help="Search memory")
-    s_p.add_argument("query", help="Search query")
+    m = sub.add_parser("memory", help="memory operations")
+    ms = m.add_subparsers(dest="mem_cmd")
+    ms.add_parser("today")
+    ms.add_parser("recent")
+    ms.add_parser("long-term")
+    ms.add_parser("consolidate")
+    sq = ms.add_parser("search")
+    sq.add_argument("query")
 
-    task_p = sub.add_parser("task", help="Manage tasks")
-    task_sub = task_p.add_subparsers(dest="task_cmd")
-    add_p = task_sub.add_parser("add", help="Add a task")
-    add_p.add_argument("name", help="Task name")
-    add_p.add_argument("command", help="Command/prompt")
-    add_p.add_argument("--interval", type=int, default=60, help="Interval in seconds")
-    task_sub.add_parser("list", help="List tasks")
-    rm_p = task_sub.add_parser("remove", help="Remove a task")
-    rm_p.add_argument("task_id", help="Task ID")
+    t = sub.add_parser("task", help="manage tasks")
+    ts = t.add_subparsers(dest="task_cmd")
+    ta = ts.add_parser("add")
+    ta.add_argument("name")
+    ta.add_argument("command")
+    ta.add_argument("--interval", type=int, default=60)
+    ts.add_parser("list")
+    tr = ts.add_parser("remove")
+    tr.add_argument("task_id")
 
-    cron_p = sub.add_parser("cron", help="Manage cron jobs")
-    cron_sub = cron_p.add_subparsers(dest="cron_cmd")
-    cadd = cron_sub.add_parser("add", help="Add a cron job")
-    cadd.add_argument("name", help="Job name")
-    cadd.add_argument("command", help="Command/prompt")
-    cadd.add_argument("--schedule", required=True, help="Schedule (every 30s, every 2h, daily 09:00)")
-    cron_sub.add_parser("list", help="List cron jobs")
-    crm = cron_sub.add_parser("remove", help="Remove a cron job")
-    crm.add_argument("job_id", help="Job ID")
-    cron_sub.add_parser("enable", help="Enable a cron job").add_argument("job_id", help="Job ID")
-    cron_sub.add_parser("disable", help="Disable a cron job").add_argument("job_id", help="Job ID")
+    c = sub.add_parser("cron", help="manage cron jobs")
+    cs = c.add_subparsers(dest="cron_cmd")
+    ca = cs.add_parser("add")
+    ca.add_argument("name")
+    ca.add_argument("command")
+    ca.add_argument("--schedule", required=True)
+    cs.add_parser("list")
+    cr = cs.add_parser("remove")
+    cr.add_argument("job_id")
+    ce = cs.add_parser("enable")
+    ce.add_argument("job_id")
+    cd = cs.add_parser("disable")
+    cd.add_argument("job_id")
 
-    hb_p = sub.add_parser("heartbeat", help="Heartbeat operations")
-    hb_sub = hb_p.add_subparsers(dest="hb_cmd")
-    hb_sub.add_parser("status", help="Show heartbeat status")
+    hb = sub.add_parser("heartbeat")
+    hs = hb.add_subparsers(dest="hb_cmd")
+    hs.add_parser("status")
 
-    ws_p = sub.add_parser("workspace", help="Workspace operations")
-    ws_sub = ws_p.add_subparsers(dest="ws_cmd")
-    ws_sub.add_parser("list", help="List workspace files")
-    ws_sub.add_parser("identity", help="Show identity")
-    ws_sub.add_parser("backup", help="Backup workspace")
+    w = sub.add_parser("workspace")
+    ws = w.add_subparsers(dest="ws_cmd")
+    ws.add_parser("list")
+    ws.add_parser("identity")
+    ws.add_parser("backup")
 
-    args = parser.parse_args()
-    config = AutonomousConfig.load(args.config)
-    setup_logging(config.log_file, args.log_level)
+    args = p.parse_args()
+    cfg = Config.load(args.config)
+    setup_logging(cfg.log_file, args.log_level)
 
-    if args.command == "run":
-        controller = PuppetController(config)
-        asyncio.run(controller.run_forever())
+    if args.cmd == "run":
+        asyncio.run(Puppet(cfg).run_forever())
 
-    elif args.command == "status":
+    elif args.cmd == "status":
         async def _status():
-            c = PuppetController(config)
-            await c.client.connect()
-            status = await c.get_status()
-            print(json.dumps(status, indent=2))
-            await c.client.disconnect()
+            c = Puppet(cfg)
+            await c.gw.connect()
+            print(json.dumps(await c.status(), indent=2))
+            await c.gw.close()
         asyncio.run(_status())
 
-    elif args.command == "init":
+    elif args.cmd == "init":
         from .workspace import Workspace
-        ws = Workspace(config.workspace_dir)
+        ws = Workspace(cfg.workspace_dir)
         created = ws.init()
-        print(f"Workspace initialized at {config.workspace_dir}")
-        if created:
-            print(f"Created: {', '.join(created)}")
-        else:
-            print("All files already exist.")
+        print(f"workspace: {cfg.workspace_dir}")
+        print(f"created: {', '.join(created)}" if created else "all files exist")
 
-    elif args.command == "send":
+    elif args.cmd == "send":
         async def _send():
-            c = PuppetController(config)
-            await c.client.connect()
-            reply = await c.send_command(args.message)
-            print(reply)
-            await c.client.disconnect()
+            c = Puppet(cfg)
+            await c.gw.connect()
+            print(await c.send(args.message))
+            await c.gw.close()
         asyncio.run(_send())
 
-    elif args.command == "memory":
+    elif args.cmd == "memory":
         from .memory import Memory
-        mem = Memory(config.workspace_dir)
+        mem = Memory(cfg.workspace_dir)
         if args.mem_cmd == "today":
-            print(mem.get_today() or "No memory for today.")
+            print(mem.today() or "no memory today")
         elif args.mem_cmd == "recent":
-            print(mem.get_recent())
+            print(mem.recent())
         elif args.mem_cmd == "long-term":
-            print(mem.get_long_term() or "No long-term memory.")
+            print(mem.long_term_content() or "no long-term memory")
         elif args.mem_cmd == "consolidate":
             print(mem.consolidate())
         elif args.mem_cmd == "search":
-            results = mem.search(args.query)
-            for r in results:
+            for r in mem.search(args.query):
                 print(f"{r['file']}:{r['line']}: {r['text']}")
 
-    elif args.command == "task":
+    elif args.cmd == "task":
         from .task_manager import TaskManager
-        from .gateway_client import GatewayClient
-        tm = TaskManager(GatewayClient(config.gateway), config.task_dir)
+        tm = TaskManager(None, cfg.task_dir)  # type: ignore[arg-type]
         if args.task_cmd == "add":
-            task = tm.add_task(args.name, args.command, interval=args.interval)
-            print(f"Added: {task.id} - {task.name}")
+            t = tm.add(args.name, args.command, interval=args.interval)
+            print(f"{t.id} - {t.name}")
         elif args.task_cmd == "list":
-            for t in tm.list_tasks():
-                status = "ON" if t.enabled else "OFF"
-                print(f"[{status}] {t.id}: {t.name} (runs: {t.run_count})")
+            for t in tm.list_all():
+                print(f"[{'ON' if t.enabled else 'OFF'}] {t.id}: {t.name} ({t.run_count} runs)")
         elif args.task_cmd == "remove":
-            if tm.remove_task(args.task_id):
-                print(f"Removed: {args.task_id}")
-            else:
-                print(f"Not found: {args.task_id}")
+            print("removed" if tm.remove(args.task_id) else "not found")
 
-    elif args.command == "cron":
-        from .cron import CronEngine
-        engine = CronEngine(config.cron_dir)
+    elif args.cmd == "cron":
+        from .cron import Cron
+        engine = Cron(cfg.cron_dir)
         if args.cron_cmd == "add":
-            job = engine.add(args.name, args.command, args.schedule)
-            print(f"Added: {job.id} - {job.name} ({job.schedule})")
+            j = engine.add(args.name, args.command, args.schedule)
+            print(f"{j.id} - {j.name} [{j.schedule}]")
         elif args.cron_cmd == "list":
-            for j in engine.list_jobs():
-                status = "ON" if j.enabled else "OFF"
-                print(f"[{status}] {j.id}: {j.name} [{j.schedule}] (runs: {j.run_count})")
+            for j in engine.list_all():
+                print(f"[{'ON' if j.enabled else 'OFF'}] {j.id}: {j.name} [{j.schedule}] ({j.run_count} runs)")
         elif args.cron_cmd == "remove":
-            if engine.remove(args.job_id):
-                print(f"Removed: {args.job_id}")
-            else:
-                print(f"Not found: {args.job_id}")
+            print("removed" if engine.remove(args.job_id) else "not found")
         elif args.cron_cmd == "enable":
             engine.enable(args.job_id)
-            print(f"Enabled: {args.job_id}")
         elif args.cron_cmd == "disable":
             engine.disable(args.job_id)
-            print(f"Disabled: {args.job_id}")
 
-    elif args.command == "heartbeat":
+    elif args.cmd == "heartbeat":
         from .heartbeat import Heartbeat
-        hb = Heartbeat(config.workspace_dir)
+        hb = Heartbeat(cfg.workspace_dir)
         if args.hb_cmd == "status":
-            status = hb.get_status()
-            for name, info in status["checks"].items():
-                due = "DUE" if info["due"] else "ok"
-                print(f"[{due}] {name}: interval={info['interval']}s")
+            for n, info in hb.status()["checks"].items():
+                tag = "DUE" if info["due"] else "ok"
+                print(f"[{tag}] {n}: {info['interval']}s")
 
-    elif args.command == "workspace":
+    elif args.cmd == "workspace":
         from .workspace import Workspace
-        ws = Workspace(config.workspace_dir)
+        ws = Workspace(cfg.workspace_dir)
         if args.ws_cmd == "list":
             for f in ws.list_files():
                 print(f"{f['name']} ({f['size']} bytes)")
         elif args.ws_cmd == "identity":
-            print(json.dumps(ws.get_identity(), indent=2))
+            print(json.dumps(ws.identity(), indent=2))
         elif args.ws_cmd == "backup":
-            path = ws.backup()
-            print(f"Backup created: {path}")
+            print(f"backup: {ws.backup()}")
 
     else:
-        parser.print_help()
+        p.print_help()
 
 
 if __name__ == "__main__":

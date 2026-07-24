@@ -6,7 +6,7 @@
   },
   "agent": {
     "agent_id": "main",
-    "model": "github-copilot/claude-opus-4.7",
+    "model": "",
     "thinking": "medium",
     "timeout": 600
   },

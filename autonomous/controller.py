@@ -1,143 +1,128 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import signal
 import sys
 from typing import Any
 
-from .config import AutonomousConfig
-from .gateway_client import GatewayClient
+from .config import Config
+from .gateway_client import Gateway
 from .memory import Memory
 from .heartbeat import Heartbeat
-from .cron import CronEngine
-from .skills import SkillRegistry
+from .cron import Cron
+from .skills import Registry
 from .workspace import Workspace
 from .task_manager import TaskManager
 
-logger = logging.getLogger("openclaw.puppet")
+log = logging.getLogger("openclaw.puppet")
 
 
-class PuppetController:
-    def __init__(self, config: AutonomousConfig):
-        self.config = config
-        self.client = GatewayClient(config.gateway)
-        self.workspace = Workspace(config.workspace_dir)
-        self.memory = Memory(config.workspace_dir)
-        self.heartbeat = Heartbeat(config.workspace_dir)
-        self.cron = CronEngine(config.cron_dir)
-        self.skills = SkillRegistry(config.skills_dir)
-        self.task_manager = TaskManager(self.client, config.task_dir)
+class Puppet:
+    def __init__(self, cfg: Config) -> None:
+        self.cfg = cfg
+        self.gw = Gateway(cfg.gateway)
+        self.ws = Workspace(cfg.workspace_dir)
+        self.mem = Memory(cfg.workspace_dir)
+        self.hb = Heartbeat(cfg.workspace_dir)
+        self.cron = Cron(cfg.cron_dir)
+        self.skills = Registry(cfg.skills_dir)
+        self.tasks = TaskManager(self.gw.send, cfg.task_dir)
         self._running = False
         self._tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
-        logger.info("Starting puppet controller")
+        log.info("starting puppet")
         self._running = True
-        await self.client.connect()
-        self.workspace.init()
-        self.memory.log("Puppet controller started", "system")
-        self._register_default_heartbeats()
-        self._register_default_crons()
-        self._tasks.append(asyncio.create_task(self._heartbeat_loop()))
-        self._tasks.append(asyncio.create_task(self._poll_loop()))
-        self._tasks.append(asyncio.create_task(self._cron_loop()))
-        logger.info("Puppet controller started — all systems online")
+        await self.gw.connect()
+        self.ws.init()
+        self.mem.log("puppet started", "system")
+        self._wire_heartbeats()
+        self._tasks.append(asyncio.create_task(self._loop_heartbeat()))
+        self._tasks.append(asyncio.create_task(self._loop_poll()))
+        self._tasks.append(asyncio.create_task(self._loop_cron()))
+        log.info("all systems online")
 
     async def stop(self) -> None:
-        logger.info("Stopping puppet controller")
+        log.info("stopping puppet")
         self._running = False
         for t in self._tasks:
             t.cancel()
-        await self.client.disconnect()
-        self.memory.log("Puppet controller stopped", "system")
-        logger.info("Puppet controller stopped")
+        await self.gw.close()
+        self.mem.log("puppet stopped", "system")
 
-    def _register_default_heartbeats(self) -> None:
-        self.heartbeat.register("status_check", 300)
-        self.heartbeat.register("memory_maintenance", 7200)
-        self.heartbeat.register("system_health", 600)
+    def _wire_heartbeats(self) -> None:
+        self.hb.register("status", 300)
+        self.hb.register("memory_maintenance", 7200)
+        self.hb.register("health", 600)
 
-    def _register_default_crons(self) -> None:
-        pass
-
-    async def _heartbeat_loop(self) -> None:
+    async def _loop_heartbeat(self) -> None:
         while self._running:
             try:
-                await asyncio.sleep(self.config.heartbeat_interval)
+                await asyncio.sleep(self.cfg.heartbeat_interval)
                 if not self._running:
                     break
-                logger.info("Heartbeat cycle starting")
-                results = await self.heartbeat.tick()
-                for r in results:
-                    self.memory.log(f"Heartbeat [{r['check']}]: {r['result'][:200]}", "heartbeat")
-                if not results:
-                    self.memory.log("Heartbeat: all checks clean", "heartbeat")
+                for r in await self.hb.tick():
+                    self.mem.log(f"heartbeat [{r['check']}]: {r['result'][:200]}", "heartbeat")
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Heartbeat loop error")
-                self.memory.log_error("Heartbeat loop error")
+                log.exception("heartbeat error")
                 await asyncio.sleep(30)
 
-    async def _poll_loop(self) -> None:
+    async def _loop_poll(self) -> None:
         while self._running:
             try:
-                await asyncio.sleep(self.config.poll_interval)
+                await asyncio.sleep(self.cfg.poll_interval)
                 if not self._running:
                     break
-                results = await self.task_manager.tick()
-                for r in results:
-                    self.memory.log(f"Task [{r.split(':')[0]}]: {r.split(':', 1)[1][:200]}", "task")
+                for r in await self.tasks.tick():
+                    self.mem.log(f"task: {r[:200]}", "task")
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Poll loop error")
+                log.exception("poll error")
                 await asyncio.sleep(10)
 
-    async def _cron_loop(self) -> None:
+    async def _loop_cron(self) -> None:
         while self._running:
             try:
                 await asyncio.sleep(30)
                 if not self._running:
                     break
-                results = await self.cron.tick()
-                for r in results:
-                    self.memory.log(f"Cron [{r['job']}]: {r['result'][:200]}", "cron")
+                for r in await self.cron.tick():
+                    self.mem.log(f"cron [{r['job']}]: {r['result'][:200]}", "cron")
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Cron loop error")
+                log.exception("cron error")
                 await asyncio.sleep(10)
 
-    async def send_command(self, message: str) -> str:
-        self.memory.log(f"Command sent: {message[:100]}", "command")
-        reply = await self.client.send_agent_message(message)
-        self.memory.log(f"Reply: {reply[:200]}", "command")
+    async def send(self, message: str) -> str:
+        self.mem.log(f"cmd: {message[:100]}", "command")
+        reply = await self.gw.send(message)
+        self.mem.log(f"reply: {reply[:200]}", "command")
         return reply
 
-    async def get_status(self) -> dict:
+    async def status(self) -> dict:
         try:
-            health = await self.client.health()
+            health = await self.gw.health()
         except Exception:
             health = {"status": "disconnected"}
         return {
             "running": self._running,
             "health": health,
-            "identity": self.workspace.get_identity(),
-            "user": self.workspace.get_user(),
-            "memory_files": len(self.memory.list_files()),
-            "heartbeat": self.heartbeat.get_status(),
-            "cron_jobs": len(self.cron.list_jobs()),
-            "skills": len(self.skills.list_skills()),
+            "identity": self.ws.identity(),
+            "user": self.ws.user(),
+            "memory_files": len(self.mem.list_files()),
+            "heartbeat": self.hb.status(),
+            "cron_jobs": len(self.cron.list_all()),
+            "skills": len(self.skills.list_all()),
             "tasks": [
-                {
-                    "id": t.id,
-                    "name": t.name,
-                    "enabled": t.enabled,
-                    "next_run": t.next_run,
-                    "run_count": t.run_count,
-                    "last_result": t.last_result[:100] if t.last_result else "",
-                }
-                for t in self.task_manager.list_tasks()
+                {"id": t.id, "name": t.name, "enabled": t.enabled,
+                 "next_run": t.next_run, "runs": t.run_count,
+                 "last": t.last_result[:100] if t.last_result else ""}
+                for t in self.tasks.list_all()
             ],
         }
 

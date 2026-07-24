@@ -1,7 +1,11 @@
-import os
+from __future__ import annotations
+
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+_DEFAULT_BASE = Path.home() / ".openclaw"
 
 
 @dataclass
@@ -14,13 +18,13 @@ class GatewayConfig:
 @dataclass
 class AgentConfig:
     agent_id: str = "main"
-    model: str = "github-copilot/claude-opus-4.7"
+    model: str = ""
     thinking: str = "medium"
     timeout: int = 600
 
 
 @dataclass
-class AutonomousConfig:
+class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     poll_interval: int = 60
@@ -33,60 +37,34 @@ class AutonomousConfig:
     enabled: bool = True
 
     @classmethod
-    def load(cls, path: str | None = None) -> "AutonomousConfig":
-        if path is None:
-            path = os.environ.get(
-                "OPENCLAW_PUPPET_CONFIG",
-                str(Path.home() / ".openclaw" / "puppet.json"),
-            )
-        config = cls()
+    def load(cls, path: str | None = None) -> Config:
+        path = path or os.environ.get("OPENCLAW_PUPPET_CONFIG", str(_DEFAULT_BASE / "puppet.json"))
+        cfg = cls()
         if os.path.exists(path):
-            with open(path) as f:
-                data = json.load(f)
-            if "gateway" in data:
-                for k, v in data["gateway"].items():
-                    if hasattr(config.gateway, k):
-                        setattr(config.gateway, k, v)
-            if "agent" in data:
-                for k, v in data["agent"].items():
-                    if hasattr(config.agent, k):
-                        setattr(config.agent, k, v)
-            for k, v in data.items():
-                if k not in ("gateway", "agent") and hasattr(config, k):
-                    setattr(config, k, v)
-        if not config.gateway.token:
-            config.gateway.token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
-        base = str(Path.home() / ".openclaw")
-        if not config.task_dir:
-            config.task_dir = os.path.join(base, "tasks")
-        if not config.cron_dir:
-            config.cron_dir = os.path.join(base, "cron")
-        if not config.skills_dir:
-            config.skills_dir = os.path.join(base, "skills")
-        if not config.workspace_dir:
-            config.workspace_dir = os.path.join(base, "workspace")
-        if not config.log_file:
-            config.log_file = os.path.join(base, "puppet.log")
-        return config
+            with open(path) as fh:
+                raw = json.load(fh)
+            _merge_dataclass(raw, "gateway", cfg.gateway)
+            _merge_dataclass(raw, "agent", cfg.agent)
+            for key in ("poll_interval", "heartbeat_interval", "task_dir", "cron_dir",
+                        "skills_dir", "workspace_dir", "log_file", "enabled"):
+                if key in raw and hasattr(cfg, key):
+                    setattr(cfg, key, raw[key])
+        if not cfg.gateway.token:
+            cfg.gateway.token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+        base = str(_DEFAULT_BASE)
+        cfg.task_dir = cfg.task_dir or os.path.join(base, "tasks")
+        cfg.cron_dir = cfg.cron_dir or os.path.join(base, "cron")
+        cfg.skills_dir = cfg.skills_dir or os.path.join(base, "skills")
+        cfg.workspace_dir = cfg.workspace_dir or os.path.join(base, "workspace")
+        cfg.log_file = cfg.log_file or os.path.join(base, "puppet.log")
+        return cfg
 
     def save(self, path: str | None = None) -> None:
-        if path is None:
-            path = os.environ.get(
-                "OPENCLAW_PUPPET_CONFIG",
-                str(Path.home() / ".openclaw" / "puppet.json"),
-            )
+        path = path or os.environ.get("OPENCLAW_PUPPET_CONFIG", str(_DEFAULT_BASE / "puppet.json"))
         data = {
-            "gateway": {
-                "url": self.gateway.url,
-                "token": self.gateway.token,
-                "timeout": self.gateway.timeout,
-            },
-            "agent": {
-                "agent_id": self.agent.agent_id,
-                "model": self.agent.model,
-                "thinking": self.agent.thinking,
-                "timeout": self.agent.timeout,
-            },
+            "gateway": {"url": self.gateway.url, "token": self.gateway.token, "timeout": self.gateway.timeout},
+            "agent": {"agent_id": self.agent.agent_id, "model": self.agent.model,
+                      "thinking": self.agent.thinking, "timeout": self.agent.timeout},
             "poll_interval": self.poll_interval,
             "heartbeat_interval": self.heartbeat_interval,
             "task_dir": self.task_dir,
@@ -97,5 +75,13 @@ class AutonomousConfig:
             "enabled": self.enabled,
         }
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+        with open(path, "w") as fh:
+            json.dump(data, fh, indent=2)
+
+
+def _merge_dataclass(raw: dict, key: str, target: object) -> None:
+    if key not in raw or not isinstance(raw[key], dict):
+        return
+    for k, v in raw[key].items():
+        if hasattr(target, k):
+            setattr(target, k, v)
