@@ -26,6 +26,9 @@ class AutonomousConfig:
     poll_interval: int = 60
     heartbeat_interval: int = 1800
     task_dir: str = ""
+    cron_dir: str = ""
+    skills_dir: str = ""
+    workspace_dir: str = ""
     log_file: str = ""
     enabled: bool = True
 
@@ -33,8 +36,8 @@ class AutonomousConfig:
     def load(cls, path: str | None = None) -> "AutonomousConfig":
         if path is None:
             path = os.environ.get(
-                "OPENCLAW_AUTONOMOUS_CONFIG",
-                str(Path.home() / ".openclaw" / "autonomous.json"),
+                "OPENCLAW_PUPPET_CONFIG",
+                str(Path.home() / ".openclaw" / "puppet.json"),
             )
         config = cls()
         if os.path.exists(path):
@@ -53,17 +56,24 @@ class AutonomousConfig:
                     setattr(config, k, v)
         if not config.gateway.token:
             config.gateway.token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")
+        base = str(Path.home() / ".openclaw")
         if not config.task_dir:
-            config.task_dir = str(Path.home() / ".openclaw" / "tasks")
+            config.task_dir = os.path.join(base, "tasks")
+        if not config.cron_dir:
+            config.cron_dir = os.path.join(base, "cron")
+        if not config.skills_dir:
+            config.skills_dir = os.path.join(base, "skills")
+        if not config.workspace_dir:
+            config.workspace_dir = os.path.join(base, "workspace")
         if not config.log_file:
-            config.log_file = str(Path.home() / ".openclaw" / "autonomous.log")
+            config.log_file = os.path.join(base, "puppet.log")
         return config
 
     def save(self, path: str | None = None) -> None:
         if path is None:
             path = os.environ.get(
-                "OPENCLAW_AUTONOMOUS_CONFIG",
-                str(Path.home() / ".openclaw" / "autonomous.json"),
+                "OPENCLAW_PUPPET_CONFIG",
+                str(Path.home() / ".openclaw" / "puppet.json"),
             )
         data = {
             "gateway": {
@@ -80,6 +90,9 @@ class AutonomousConfig:
             "poll_interval": self.poll_interval,
             "heartbeat_interval": self.heartbeat_interval,
             "task_dir": self.task_dir,
+            "cron_dir": self.cron_dir,
+            "skills_dir": self.skills_dir,
+            "workspace_dir": self.workspace_dir,
             "log_file": self.log_file,
             "enabled": self.enabled,
         }

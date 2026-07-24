@@ -1,0 +1,21 @@
+{
+  "gateway": {
+    "url": "ws://127.0.0.1:18789",
+    "token": "",
+    "timeout": 300
+  },
+  "agent": {
+    "agent_id": "main",
+    "model": "github-copilot/claude-opus-4.7",
+    "thinking": "medium",
+    "timeout": 600
+  },
+  "poll_interval": 60,
+  "heartbeat_interval": 1800,
+  "task_dir": "",
+  "cron_dir": "",
+  "skills_dir": "",
+  "workspace_dir": "",
+  "log_file": "",
+  "enabled": true
+}

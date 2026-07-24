@@ -1,17 +1,21 @@
 # OpenClaw Puppet
 
-Puppet master for OpenClaw. Pull the strings, run the agent, no human needed.
+Puppet master for OpenClaw. Controls it like a tool, not a chatbot.
 
-## What This Does
+## What It Does
 
-You feed it a task. It connects to OpenClaw Gateway via WebSocket and executes. Heartbeats, scheduled tasks, direct commands -- all autonomous. The agent does what you tell it. Nothing more.
+- **Memory** — Daily notes, long-term memory, search, consolidation
+- **Heartbeat** — Proactive monitoring, periodic self-checks
+- **Cron** — Scheduled tasks with flexible intervals
+- **Skills** — Modular tool system, extensible
+- **Workspace** — Persistent identity, user context, soul
 
 ## Quick Start
 
 ```bash
 pip install -r autonomous/requirements.txt
 python setup.py
-# Edit ~/.openclaw/autonomous.json with your gateway token
+# Edit ~/.openclaw/puppet.json with your gateway token
 openclaw gateway run
 python -m autonomous.run run
 ```
@@ -19,57 +23,87 @@ python -m autonomous.run run
 ## CLI
 
 ```bash
-python -m autonomous.run run                    # start puppet controller
-python -m autonomous.run status                 # check status
-python -m autonomous.run send "what's the status?"  # direct command
-python -m autonomous.run task add "check email" "check for urgent emails" --interval 300
-python -m autonomous.run task list              # list tasks
-python -m autonomous.run task remove task-0001  # remove task
+# Core
+python -m autonomous.run run          # Start controller
+python -m autonomous.run status       # Show status
+python -m autonomous.run init         # Init workspace
+python -m autonomous.run send "msg"   # Send message
+
+# Memory
+python -m autonomous.run memory today
+python -m autonomous.run memory recent
+python -m autonomous.run memory long-term
+python -m autonomous.run memory consolidate
+python -m autonomous.run memory search "query"
+
+# Tasks
+python -m autonomous.run task add "name" "command" --interval 60
+python -m autonomous.run task list
+python -m autonomous.run task remove task-0001
+
+# Cron
+python -m autonomous.run cron add "name" "command" --schedule "every 30m"
+python -m autonomous.run cron add "backup" "backup files" --schedule "daily 03:00"
+python -m autonomous.run cron list
+python -m autonomous.run cron remove cron-0001
+python -m autonomous.run cron enable cron-0001
+python -m autonomous.run cron disable cron-0001
+
+# Heartbeat
+python -m autonomous.run heartbeat status
+
+# Workspace
+python -m autonomous.run workspace list
+python -m autonomous.run workspace identity
+python -m autonomous.run workspace backup
 ```
 
-## Configuration
+## Architecture
 
-`~/.openclaw/autonomous.json`:
+```
+┌──────────────────────────────────────────────┐
+│              PuppetController                │
+│                                              │
+│  ┌─────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Memory  │  │ Heartbeat│  │   Cron   │   │
+│  │ System  │  │ Monitor  │  │  Engine  │   │
+│  └────┬────┘  └────┬─────┘  └────┬─────┘   │
+│       │            │             │           │
+│  ┌────┴────────────┴─────────────┴────┐     │
+│  │         GatewayClient              │     │
+│  │      (WebSocket → OpenClaw)        │     │
+│  └────────────────────────────────────┘     │
+│                                              │
+│  ┌──────────┐  ┌──────────┐                 │
+│  │ Workspace│  │  Skills  │                 │
+│  │ Manager  │  │ Registry │                 │
+│  └──────────┘  └──────────┘                 │
+└──────────────────────────────────────────────┘
+```
+
+## Config
+
+Edit `~/.openclaw/puppet.json`:
 
 ```json
 {
   "gateway": {
     "url": "ws://127.0.0.1:18789",
-    "token": "your-gateway-token"
-  },
-  "agent": {
-    "agent_id": "main",
-    "model": "github-copilot/claude-opus-4.7"
+    "token": "your-token"
   },
   "poll_interval": 60,
   "heartbeat_interval": 1800
 }
 ```
 
-## Workspace Overrides
+## Features Inherited from OpenClaw
 
-`workspace-overrides/` contains modified workspace files. Setup copies them to `~/.openclaw/workspace/`.
-
-- `SOUL.md` -- Puppet control philosophy
-- `AGENTS.md` -- Autonomous behavior rules
-- `IDENTITY.md` -- Agent identity
-- `USER.md` -- User context
-- `HEARTBEAT.md` -- Proactive check tasks
-
-## Architecture
-
-```
-┌──────────────────┐     WebSocket      ┌──────────────┐
-│  Puppet          │◄──────────────────►│   OpenClaw   │
-│  Controller      │                    │   Gateway    │
-│                  │     agent.turn     │              │
-│  TaskManager     │───────────────────►│   Agent      │
-│  HeartbeatLoop   │                    │   (Claude)   │
-└──────────────────┘                    └──────────────┘
-```
-
-The puppet controller sits between you and the gateway. It manages tasks, sends commands, monitors health. The agent does the work. The controller pulls the strings.
-
-## Workspace Overrides
-
-Copied to `~/.openclaw/workspace/` during setup. These override the default agent personality to make it autonomous and action-first.
+| Feature | Implementation |
+|---------|---------------|
+| Memory | `memory.py` — daily notes, MEMORY.md, search, consolidation |
+| Heartbeat | `heartbeat.py` — configurable periodic checks |
+| Cron | `cron.py` — flexible scheduling (every Ns, daily HH:MM) |
+| Skills | `skills.py` — modular tool registration and execution |
+| Workspace | `workspace.py` — SOUL.md, IDENTITY.md, USER.md management |
+| Sessions | Via Gateway WebSocket client |
+| Tasks | `task_manager.py` — persistent task queue |

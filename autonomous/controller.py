@@ -2,49 +2,62 @@ import asyncio
 import logging
 import signal
 import sys
-import time
 from typing import Any
 
 from .config import AutonomousConfig
 from .gateway_client import GatewayClient
+from .memory import Memory
+from .heartbeat import Heartbeat
+from .cron import CronEngine
+from .skills import SkillRegistry
+from .workspace import Workspace
 from .task_manager import TaskManager
 
 logger = logging.getLogger("openclaw.puppet")
 
 
-class AutonomousController:
+class PuppetController:
     def __init__(self, config: AutonomousConfig):
         self.config = config
         self.client = GatewayClient(config.gateway)
+        self.workspace = Workspace(config.workspace_dir)
+        self.memory = Memory(config.workspace_dir)
+        self.heartbeat = Heartbeat(config.workspace_dir)
+        self.cron = CronEngine(config.cron_dir)
+        self.skills = SkillRegistry(config.skills_dir)
         self.task_manager = TaskManager(self.client, config.task_dir)
         self._running = False
-        self._heartbeat_task: asyncio.Task | None = None
-        self._poll_task: asyncio.Task | None = None
-        self._setup_default_handlers()
-
-    def _setup_default_handlers(self) -> None:
-        self.task_manager.register_handler("heartbeat", self._handle_heartbeat)
-        self.task_manager.register_handler("poll", self._handle_poll)
-        self.task_manager.register_handler("message", self._handle_message)
-        self.task_manager.register_handler("status", self._handle_status)
+        self._tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
         logger.info("Starting puppet controller")
         self._running = True
         await self.client.connect()
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-        self._poll_task = asyncio.create_task(self._poll_loop())
-        logger.info("Puppet controller started")
+        self.workspace.init()
+        self.memory.log("Puppet controller started", "system")
+        self._register_default_heartbeats()
+        self._register_default_crons()
+        self._tasks.append(asyncio.create_task(self._heartbeat_loop()))
+        self._tasks.append(asyncio.create_task(self._poll_loop()))
+        self._tasks.append(asyncio.create_task(self._cron_loop()))
+        logger.info("Puppet controller started — all systems online")
 
     async def stop(self) -> None:
         logger.info("Stopping puppet controller")
         self._running = False
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-        if self._poll_task:
-            self._poll_task.cancel()
+        for t in self._tasks:
+            t.cancel()
         await self.client.disconnect()
+        self.memory.log("Puppet controller stopped", "system")
         logger.info("Puppet controller stopped")
+
+    def _register_default_heartbeats(self) -> None:
+        self.heartbeat.register("status_check", 300)
+        self.heartbeat.register("memory_maintenance", 7200)
+        self.heartbeat.register("system_health", 600)
+
+    def _register_default_crons(self) -> None:
+        pass
 
     async def _heartbeat_loop(self) -> None:
         while self._running:
@@ -52,17 +65,17 @@ class AutonomousController:
                 await asyncio.sleep(self.config.heartbeat_interval)
                 if not self._running:
                     break
-                logger.info("Heartbeat: checking in")
-                reply = await self.client.send_agent_message(
-                    "HEARTBEAT_CHECK: Puppet controller periodic check. "
-                    "Report status. Check for pending tasks. "
-                    "If nothing to report, respond with HEARTBEAT_OK."
-                )
-                logger.info("Heartbeat response: %s", reply[:200])
+                logger.info("Heartbeat cycle starting")
+                results = await self.heartbeat.tick()
+                for r in results:
+                    self.memory.log(f"Heartbeat [{r['check']}]: {r['result'][:200]}", "heartbeat")
+                if not results:
+                    self.memory.log("Heartbeat: all checks clean", "heartbeat")
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Heartbeat error")
+                logger.exception("Heartbeat loop error")
+                self.memory.log_error("Heartbeat loop error")
                 await asyncio.sleep(30)
 
     async def _poll_loop(self) -> None:
@@ -72,17 +85,34 @@ class AutonomousController:
                 if not self._running:
                     break
                 results = await self.task_manager.tick()
-                if results:
-                    for r in results:
-                        logger.info("Task result: %s", r)
+                for r in results:
+                    self.memory.log(f"Task [{r.split(':')[0]}]: {r.split(':', 1)[1][:200]}", "task")
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Poll error")
+                logger.exception("Poll loop error")
+                await asyncio.sleep(10)
+
+    async def _cron_loop(self) -> None:
+        while self._running:
+            try:
+                await asyncio.sleep(30)
+                if not self._running:
+                    break
+                results = await self.cron.tick()
+                for r in results:
+                    self.memory.log(f"Cron [{r['job']}]: {r['result'][:200]}", "cron")
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Cron loop error")
                 await asyncio.sleep(10)
 
     async def send_command(self, message: str) -> str:
-        return await self.client.send_agent_message(message)
+        self.memory.log(f"Command sent: {message[:100]}", "command")
+        reply = await self.client.send_agent_message(message)
+        self.memory.log(f"Reply: {reply[:200]}", "command")
+        return reply
 
     async def get_status(self) -> dict:
         try:
@@ -92,6 +122,12 @@ class AutonomousController:
         return {
             "running": self._running,
             "health": health,
+            "identity": self.workspace.get_identity(),
+            "user": self.workspace.get_user(),
+            "memory_files": len(self.memory.list_files()),
+            "heartbeat": self.heartbeat.get_status(),
+            "cron_jobs": len(self.cron.list_jobs()),
+            "skills": len(self.skills.list_skills()),
             "tasks": [
                 {
                     "id": t.id,
