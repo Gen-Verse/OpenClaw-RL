@@ -9,7 +9,7 @@ from .config import AutonomousConfig
 from .gateway_client import GatewayClient
 from .task_manager import TaskManager
 
-logger = logging.getLogger("openclaw.autonomous")
+logger = logging.getLogger("openclaw.puppet")
 
 
 class AutonomousController:
@@ -29,22 +29,22 @@ class AutonomousController:
         self.task_manager.register_handler("status", self._handle_status)
 
     async def start(self) -> None:
-        logger.info("Starting autonomous controller")
+        logger.info("Starting puppet controller")
         self._running = True
         await self.client.connect()
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         self._poll_task = asyncio.create_task(self._poll_loop())
-        logger.info("Autonomous controller started")
+        logger.info("Puppet controller started")
 
     async def stop(self) -> None:
-        logger.info("Stopping autonomous controller")
+        logger.info("Stopping puppet controller")
         self._running = False
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
         if self._poll_task:
             self._poll_task.cancel()
         await self.client.disconnect()
-        logger.info("Autonomous controller stopped")
+        logger.info("Puppet controller stopped")
 
     async def _heartbeat_loop(self) -> None:
         while self._running:
@@ -54,7 +54,7 @@ class AutonomousController:
                     break
                 logger.info("Heartbeat: checking in")
                 reply = await self.client.send_agent_message(
-                    "HEARTBEAT_CHECK: Autonomous controller periodic check. "
+                    "HEARTBEAT_CHECK: Puppet controller periodic check. "
                     "Report status. Check for pending tasks. "
                     "If nothing to report, respond with HEARTBEAT_OK."
                 )

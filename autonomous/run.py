@@ -9,7 +9,7 @@ from .controller import AutonomousController, setup_logging
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OpenClaw Autonomous Controller")
+    parser = argparse.ArgumentParser(description="OpenClaw Puppet Controller")
     parser.add_argument("--config", help="Config file path")
     parser.add_argument("--log-level", default="INFO", help="Log level")
     sub = parser.add_subparsers(dest="command")
