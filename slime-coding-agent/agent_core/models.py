@@ -21,6 +21,7 @@ class CommandResult:
     exit_code: int
     stdout: str
     stderr: str
+    duration_ms: int
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -41,6 +42,8 @@ class RolloutEvent:
     reward_components: Dict[str, float]
     total_reward: float
     final_status: str
+    experiment: str
+    usage: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

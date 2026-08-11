@@ -15,3 +15,5 @@ experiments:
     multi_judge: true
     failure_replay: true
     cost_penalty: true
+
+events_dir: slime-coding-agent/outputs/ablations

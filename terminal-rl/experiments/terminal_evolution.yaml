@@ -1,0 +1,39 @@
+data:
+  task_root: terminal-rl/dataset/seta_env
+  split_dir: terminal-rl/dataset/seta_evolution_split
+  train_jsonl: terminal-rl/dataset/seta_evolution_split/train.jsonl
+  heldout_jsonl: terminal-rl/dataset/seta_evolution_split/heldout.jsonl
+  split_seed: terminal-evolution-v1
+  holdout_fraction: 0.2
+
+training:
+  rollout_batch_size: 16
+  n_samples_per_prompt: 8
+  max_interactive_steps: 10
+  metrics_path: terminal-rl/outputs/metrics/rl.jsonl
+  trajectory_log: terminal-rl/outputs/trajectories/train.jsonl
+
+evaluation:
+  n_samples_per_prompt: 8
+  result_root: terminal-rl/outputs/eval
+  metrics:
+    - terminal_rollout_accuracy
+    - pass_at_1
+    - pass_at_8
+    - resolve_rate
+    - avg_steps
+    - skill_retrieval_rate
+
+variants:
+  base:
+    checkpoint_env: BASE_CKPT
+    skill_retrieval: false
+  rl_only:
+    checkpoint_env: RL_CKPT
+    skill_retrieval: false
+  skill_only:
+    checkpoint_env: BASE_CKPT
+    skill_retrieval: true
+  rl_skill:
+    checkpoint_env: RL_CKPT
+    skill_retrieval: true

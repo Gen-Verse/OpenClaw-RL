@@ -4,7 +4,34 @@ project:
 
 model:
   policy_model: Qwen/Qwen3-4B
-  judge_model: Qwen/Qwen3-4B
+
+training:
+  backend: fsdp
+  single_gpu: true
+  qlora:
+    enabled: true
+    load_in_4bit: true
+    quant_type: nf4
+    compute_dtype: bfloat16
+    rank: 4
+    alpha: 4
+  gradient_checkpointing: true
+  micro_batch_size: 1
+  max_tokens_per_gpu: 4096
+
+rollout:
+  backend: sglang
+  colocate: true
+  offload_when_training: true
+  context_length: 22768
+  logits_chunk_size: 128
+
+prm:
+  provider: openai-compatible
+  use_external_api: true
+  api_base_env: PRM_EXTERNAL_API_BASE
+  api_key_env: PRM_EXTERNAL_API_KEY
+  model_env: PRM_EXTERNAL_MODEL
 
 runtime:
   planner_enabled: true

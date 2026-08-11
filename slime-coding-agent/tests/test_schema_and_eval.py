@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from agent_core.schema import validate_required_fields, validate_action_type, validate_reward_components
+from eval.ablation_runner import evaluate_experiments
 from eval.swebench_runner import summarize
 
 
@@ -24,10 +25,40 @@ class TestSchemaAndEval(unittest.TestCase):
         validate_reward_components(event)
 
     def test_summarize(self):
-        events = [{'final_status': 'success'}, {'final_status': 'failed'}]
+        events = [
+            {
+                'repo_id': 'r', 'task_id': 't1', 'final_status': 'success',
+                'command_results': [{}, {}], 'usage': {'total_tokens': 100},
+            },
+            {
+                'repo_id': 'r', 'task_id': 't2', 'final_status': 'failed',
+                'command_results': [{}],
+            },
+        ]
         metrics = summarize(events)
         self.assertEqual(metrics['resolve_rate'], 0.5)
         self.assertEqual(metrics['pass_at_1'], 0.5)
+        self.assertEqual(metrics['avg_cost_tokens'], 100)
+        self.assertEqual(metrics['avg_steps'], 1.5)
+
+    def test_ablation_reports_only_observed_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event_dir = Path(tmp)
+            (event_dir / 'baseline.jsonl').write_text(
+                json.dumps({'repo_id': 'r', 'task_id': 't', 'final_status': 'success'}) + '\n',
+                encoding='utf-8',
+            )
+            results = evaluate_experiments(
+                [
+                    {'name': 'baseline'},
+                    {'name': 'full', 'multi_judge': True},
+                ],
+                event_dir,
+            )
+        self.assertEqual(results[0]['status'], 'completed')
+        self.assertEqual(results[0]['metrics']['resolve_rate'], 1.0)
+        self.assertEqual(results[1]['status'], 'pending')
+        self.assertIsNone(results[1]['metrics'])
 
 
 if __name__ == '__main__':

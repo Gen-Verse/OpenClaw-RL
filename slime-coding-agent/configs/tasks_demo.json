@@ -4,7 +4,7 @@
     "task_id": "task-echo",
     "benchmark_id": "swebench-lite",
     "commit_base": "HEAD",
-    "commands": ["echo hello", "python -c \"print(1+1)\""]
+    "commands": ["python -c \"print('hello')\"", "python -c \"print(1+1)\""]
   },
   {
     "repo_id": "demo/repo",

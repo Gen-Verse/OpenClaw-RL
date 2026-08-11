@@ -5,37 +5,44 @@ from pathlib import Path
 
 import yaml
 
+try:
+    from .swebench_runner import load_events, summarize
+except ImportError:
+    from swebench_runner import load_events, summarize
+
 
 def load_yaml(path: str):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def adjusted_score(base: float, exp):
-    score = base
-    if exp.get("multi_judge"):
-        score += 0.04
-    if exp.get("failure_replay"):
-        score += 0.05
-    if exp.get("cost_penalty"):
-        score += 0.02
-    return round(min(score, 1.0), 4)
+def evaluate_experiments(experiments, events_dir: Path):
+    results = []
+    for exp in experiments:
+        name = Path(exp["name"]).name
+        event_path = events_dir / f"{name}.jsonl"
+        events = load_events(str(event_path))
+        results.append(
+            {
+                "name": name,
+                "status": "completed" if events else "pending",
+                "events": str(event_path),
+                "metrics": summarize(events) if events else None,
+                "config": exp,
+            }
+        )
+    return results
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="slime-coding-agent/configs/ablation.yaml")
-    parser.add_argument("--metrics", default="slime-coding-agent/outputs/swebench_metrics.json")
+    parser.add_argument("--events-dir", default="slime-coding-agent/outputs/ablations")
     parser.add_argument("--output", default="slime-coding-agent/outputs/ablation_results.json")
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
-    metrics = json.loads(Path(args.metrics).read_text(encoding="utf-8"))
-    base_resolve = metrics.get("resolve_rate", 0.0)
-
-    results = []
-    for exp in cfg["experiments"]:
-        results.append({"name": exp["name"], "resolve_rate": adjusted_score(base_resolve, exp), "config": exp})
+    results = evaluate_experiments(cfg["experiments"], Path(args.events_dir))
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)

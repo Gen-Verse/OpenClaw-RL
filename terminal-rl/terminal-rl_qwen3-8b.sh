@@ -30,6 +30,19 @@ REF_LOAD="${REF_LOAD:-}"
 SAVE_CKPT="${SAVE_CKPT:-}"
 RESUME_LOAD="${RESUME_LOAD:-${SAVE_CKPT}}"
 ROLLOUT_PROMPT_DATA="${ROLLOUT_PROMPT_DATA:-}"
+EVAL_PROMPT_DATA="${EVAL_PROMPT_DATA:-}"
+EVAL_INTERVAL="${EVAL_INTERVAL:-8}"
+ROLLOUT_BATCH_SIZE="${ROLLOUT_BATCH_SIZE:-16}"
+N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-8}"
+NUM_STEPS_PER_ROLLOUT="${NUM_STEPS_PER_ROLLOUT:-2}"
+N_SAMPLES_PER_EVAL_PROMPT="${N_SAMPLES_PER_EVAL_PROMPT:-8}"
+export TERMINAL_METRICS_PATH="${TERMINAL_METRICS_PATH:-}"
+export TERMINAL_EVAL_RESULTS_PATH="${TERMINAL_EVAL_RESULTS_PATH:-}"
+export TERMINAL_TRAJECTORY_LOG="${TERMINAL_TRAJECTORY_LOG:-}"
+export EVOLUTION_SERVER_URL="${EVOLUTION_SERVER_URL:-}"
+export TERMINAL_SKILL_RETRIEVAL="${TERMINAL_SKILL_RETRIEVAL:-0}"
+export TERMINAL_SKILLS_DIR="${TERMINAL_SKILLS_DIR:-}"
+export TERMINAL_SKILL_TOP_K="${TERMINAL_SKILL_TOP_K:-3}"
 
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-max_split_size_mb:2048,expandable_segments:True}"
 export MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
@@ -74,21 +87,27 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --reward-key score
    --num-rollout 2000
-   --rollout-batch-size 16
-   --n-samples-per-prompt 8
+   --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
+   --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"
    --rollout-max-response-len 8192
    --rollout-max-context-len 16384
    --rollout-temperature 1
 
-   --num-steps-per-rollout 2
+   --num-steps-per-rollout "${NUM_STEPS_PER_ROLLOUT}"
    --balance-data
 )
 
-EVAL_ARGS=(
-   --n-samples-per-eval-prompt 16
-   --eval-max-response-len 16384
-   --eval-top-p 1
-)
+EVAL_ARGS=()
+if [[ -n "${EVAL_PROMPT_DATA}" ]]; then
+  EVAL_ARGS=(
+    --eval-prompt-data terminal_heldout "${EVAL_PROMPT_DATA}"
+    --eval-input-key task
+    --eval-interval "${EVAL_INTERVAL}"
+    --n-samples-per-eval-prompt "${N_SAMPLES_PER_EVAL_PROMPT}"
+    --eval-max-response-len 16384
+    --eval-top-p 1
+  )
+fi
 
 
 PERF_ARGS=(
@@ -155,6 +174,7 @@ MISC_ARGS=(
 CUSTOM_ARGS=(
    --custom-generate-function-path generate.generate
    --custom-rollout-log-function-path rollout_log.rollout_log
+   --custom-eval-rollout-log-function-path terminal_eval_log.log_eval_rollout_data
    --custom-config-path "${CUSTOM_CONFIG_PATH}"
 )
 
@@ -274,6 +294,13 @@ env_vars = {
   "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF",""),
   "USE_REMOTE_ENV": os.environ.get("USE_REMOTE_ENV","0"),
   "ENV_SERVER_URL": os.environ.get("ENV_SERVER_URL",""),
+  "TERMINAL_METRICS_PATH": os.environ.get("TERMINAL_METRICS_PATH",""),
+  "TERMINAL_EVAL_RESULTS_PATH": os.environ.get("TERMINAL_EVAL_RESULTS_PATH",""),
+  "TERMINAL_TRAJECTORY_LOG": os.environ.get("TERMINAL_TRAJECTORY_LOG",""),
+  "EVOLUTION_SERVER_URL": os.environ.get("EVOLUTION_SERVER_URL",""),
+  "TERMINAL_SKILL_RETRIEVAL": os.environ.get("TERMINAL_SKILL_RETRIEVAL","0"),
+  "TERMINAL_SKILLS_DIR": os.environ.get("TERMINAL_SKILLS_DIR",""),
+  "TERMINAL_SKILL_TOP_K": os.environ.get("TERMINAL_SKILL_TOP_K","3"),
 }
 print(json.dumps({"env_vars": env_vars}))
 PY

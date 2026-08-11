@@ -1,0 +1,43 @@
+server:
+  host: 0.0.0.0
+  port: 8010
+
+schedule:
+  automatic: true
+  enabled: true
+  start_hour: 23
+  end_hour: 7
+  poll_seconds: 900
+
+data:
+  trajectory_log: slime-coding-agent/outputs/trajectories.jsonl
+  training_batch_dir: slime-coding-agent/outputs/training/batches
+  state_path: slime-coding-agent/outputs/evolution_status.json
+
+training:
+  enabled: true
+  execute: false
+  min_gpu_count: 8
+  min_free_vram_gb_per_gpu: 24
+  command:
+    - bash
+    - openclaw-combine/run_qwen3_4b_openclaw_combine.sh
+  environment:
+    NUM_GPUS: "8"
+    ACTOR_GPUS: "4"
+    ROLLOUT_GPUS: "2"
+    PRM_GPUS: "1"
+    PRM_TEACHER_GPUS: "1"
+    OPENCLAW_COMBINE_W_RL: "1.0"
+    OPENCLAW_COMBINE_W_OPD: "1.0"
+  log_path: slime-coding-agent/outputs/training/evolution-train.log
+
+skill_fallback:
+  max_failures_per_cycle: 50
+  skills_dir: slime-coding-agent/skills/generated
+  index_path: slime-coding-agent/skills/index.json
+  summarizer:
+    mode: heuristic
+    api_base_env: SKILL_LLM_API_BASE
+    api_key_env: SKILL_LLM_API_KEY
+    model_env: SKILL_LLM_MODEL
