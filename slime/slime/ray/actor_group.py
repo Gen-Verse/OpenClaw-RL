@@ -148,3 +148,20 @@ class RayTrainGroup:
         """Broadcast PRM teacher log-probs (computed on a separate GPU) to all actor ranks."""
         prm_lps_ref = ray.put(prm_teacher_log_probs)
         return ray.get([actor.set_prm_teacher_log_probs.remote(prm_lps_ref) for actor in self._actor_handlers])
+
+    def async_compute_student_topk(self, rollout_id, rollout_data_ref):
+        """Run the student-side old_actor pass and return rank-0's student top-K indices.
+
+        Used by ``--distill-subset-mode student``: the outer loop ships these
+        indices to the PRM teacher group's ``async_gather_at_indices`` so the
+        teacher's log-probs are aligned to the student's subset.
+        """
+        return [actor.compute_student_topk.remote(rollout_id, rollout_data_ref) for actor in self._actor_handlers]
+
+    def async_gather_at_indices(self, rollout_id, rollout_data_ref, indices_per_sample):
+        """Run a PRM-teacher forward gathering log-probs at provided indices."""
+        idx_ref = ray.put(indices_per_sample)
+        return [
+            actor.gather_at_indices.remote(rollout_id, rollout_data_ref, idx_ref)
+            for actor in self._actor_handlers
+        ]

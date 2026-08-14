@@ -1,6 +1,5 @@
 #!/bin/bash
-# Qwen3.5-4B full fine-tuning with OpenClaw combined method (Binary RL + OPD)
-# Uses Megatron backend with tensor parallelism
+# Qwen3.5-4B OpenClaw combined training (Binary RL + OPD).
 
 SKIP_CLUSTER_CLEANUP=${SKIP_CLUSTER_CLEANUP:-0}
 if [ "${SKIP_CLUSTER_CLEANUP}" != "1" ]; then
@@ -24,9 +23,7 @@ NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
 ROLLOUT_GPUS=${ROLLOUT_GPUS:-2}
 
-# OPD teacher source decides GPU layout for PRM:
-#   megatron  (default): 1 GPU PRM SGLang + 1 GPU Megatron teacher = "1+1"
-#   inference:           2 GPU PRM SGLang + 0 GPU Megatron teacher
+# OPD teacher source: "megatron" = 1+1 PRM/teacher split; "inference" = 2+0.
 OPD_SRC="${OPENCLAW_COMBINE_OPD_TEACHER_SOURCE:-megatron}"
 if [ "${OPD_SRC}" = "inference" ]; then
     PRM_GPUS=${PRM_GPUS:-2}
@@ -55,10 +52,10 @@ SLIME_ROOT="${REPO_ROOT}/slime"
 source "${SLIME_ROOT}/scripts/models/qwen3.5-4B.sh"
 
 HF_CKPT=${HF_CKPT:-/data_storage/wyj/systems/huggingface/hub/Qwen35-4B}
-REF_LOAD=${REF_LOAD:-${HF_CKPT}}
+REF_LOAD=${REF_LOAD:-/data_storage/wyj/systems/huggingface/hub/qwen35-4b_torch_dist}
 SAVE_CKPT=${SAVE_CKPT:-${REPO_ROOT}/ckpt/qwen35-4b-openclaw-combine}
 PRM_MODEL_PATH=${PRM_MODEL_PATH:-/data_storage/wyj/systems/huggingface/hub/Qwen35-4B}
-PRM_TEACHER_LOAD=${PRM_TEACHER_LOAD:-${PRM_MODEL_PATH}}
+PRM_TEACHER_LOAD=${PRM_TEACHER_LOAD:-${REF_LOAD}}
 
 export SGLANG_API_KEY="${SGLANG_API_KEY}"
 export SERVED_MODEL_NAME="qwen3.5-4b"
@@ -72,21 +69,18 @@ export MEM_FRACTION_STATIC="0.8"
 export REASONING_PARSER="${REASONING_PARSER:-qwen3}"
 export TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen3_coder}"
 export SGLANG_LANGUAGE_ONLY="${SGLANG_LANGUAGE_ONLY:-1}"
-export SLIME_QWEN35_TEXT_ONLY_BRIDGE="${SLIME_QWEN35_TEXT_ONLY_BRIDGE:-1}"
+# Qwen3.5 must use the raw spec path (slime_plugins/models/qwen3_5.py) to
+# preserve the hybrid linear/full-attention layout. Do NOT set
+# SLIME_QWEN35_TEXT_ONLY_BRIDGE or --megatron-to-hf-mode bridge here.
 export PRM_M="${PRM_M:-1}"
 export OPENCLAW_OPD_TEACHER_LP_MAX_CONCURRENCY="${OPENCLAW_OPD_TEACHER_LP_MAX_CONCURRENCY:-1}"
 export OPENCLAW_COMBINE_W_RL="${OPENCLAW_COMBINE_W_RL:-1.0}"
 export OPENCLAW_COMBINE_W_OPD="${OPENCLAW_COMBINE_W_OPD:-1.0}"
 export TRAIN_EPOCHS="${TRAIN_EPOCHS:-2}"
 
-# OPD teacher source (driven by OPD_SRC set above from GPU layout logic):
-#   megatron (default) = PRM teacher log-probs computed by Megatron via --prm-teacher-load.
-#                        Same code path as student, no numerical mismatch.
-#   inference          = teacher_log_probs from PRM SGLang inference engine.
 export OPENCLAW_COMBINE_OPD_TEACHER_SOURCE="${OPD_SRC}"
 
 CKPT_ARGS=(
-   --megatron-to-hf-mode bridge
    --hf-checkpoint "${HF_CKPT}"
    --ref-load "${REF_LOAD}"
    --save "${SAVE_CKPT}"
@@ -116,6 +110,8 @@ ROLLOUT_ARGS=(
 )
 
 PERF_ARGS=(
+   # TP=4 + SP requires the gradient fix in slime_plugins/models/hf_attention.py
+   # for the hybrid linear-attention layers.
    --tensor-model-parallel-size 4
    --sequence-parallel
    --pipeline-model-parallel-size 1
@@ -127,6 +123,8 @@ PERF_ARGS=(
    --recompute-method uniform
    --recompute-num-layers 1
 
+   # Stay on thd (dynamic batching). The spec path requires
+   # packed_seq_params.cu_seqlens_q, which bshd does not provide.
    --use-dynamic-batch-size
    --max-tokens-per-gpu 32768
    --log-probs-chunk-size 1024
@@ -222,7 +220,6 @@ RUNTIME_ENV_JSON="{
     \"OPENCLAW_EVAL_MODE\": \"${OPENCLAW_EVAL_MODE}\",
     \"OPENCLAW_COMBINE_W_RL\": \"${OPENCLAW_COMBINE_W_RL}\",
     \"OPENCLAW_COMBINE_W_OPD\": \"${OPENCLAW_COMBINE_W_OPD}\",
-    \"SLIME_QWEN35_TEXT_ONLY_BRIDGE\": \"${SLIME_QWEN35_TEXT_ONLY_BRIDGE}\",
     \"OPENCLAW_COMBINE_OPD_TEACHER_SOURCE\": \"${OPENCLAW_COMBINE_OPD_TEACHER_SOURCE}\",
     \"TRAIN_EPOCHS\": \"${TRAIN_EPOCHS}\"
   }

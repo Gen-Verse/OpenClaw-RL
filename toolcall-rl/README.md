@@ -82,6 +82,13 @@ PYTHONPATH=/path/to/Megatron-LM python tools/convert_hf_to_torch_dist.py \
     --rotary-base 5000000 \
     --save /path/to/qwen3-4b-sft_torch_dist
 
+# or for qwen3.5:
+source scripts/models/qwen3-4B.sh
+PYTHONPATH=/path/to/Megatron-LM python tools/convert_hf_to_torch_dist.py \
+    ${MODEL_ARGS[@]} \
+    --hf-checkpoint /path/to/qwen3.5-4b \
+    --save /path/to/qwen3.5-4b-torch_dist
+
 # Download RL data and run
 huggingface-cli download --repo-type dataset BytedTsinghua-SIA/DAPO-Math-17k --local-dir /path/to/dapo-math-17k
 huggingface-cli download --repo-type dataset zhuzilin/aime-2024 --local-dir /path/to/aime-2024

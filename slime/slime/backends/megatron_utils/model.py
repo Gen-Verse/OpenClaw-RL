@@ -375,6 +375,14 @@ def train_one_step(
                 "prm_teacher_log_probs",
                 "teacher_topk_log_probs",
                 "teacher_topk_indices",
+                "prm_teacher_topk_log_probs",
+                "prm_teacher_topk_indices",
+                "prm_teacher_topk_log_probs_cand",
+                "prm_teacher_topk_indices_cand",
+                "prm_teacher_native_topk_indices_cand",
+                "topk_log_probs",
+                "topk_indices",
+                "step_wise_step_token_spans",
             ],
             args.data_pad_size_multiplier,
             args.qkv_format,
@@ -402,6 +410,14 @@ def train_one_step(
                 "labels": None,
                 "packed_seq_params": batch["packed_seq_params"],
                 "loss_mask": batch["full_loss_masks"],
+                # Match the forward-only path: do NOT have Megatron's
+                # Float16Module upcast the [1, T, V] logits to fp32. Slime's
+                # loss/log-prob code (get_responses + get_log_probs_and_entropy)
+                # accepts bf16/fp16 logits and upcasts only the per-sample
+                # response slices internally. Without this, packing 2 samples
+                # into a 16K microbatch produces a 7.58 GiB fp32 logits
+                # allocation that OOMs an 80GB GPU.
+                "fp32_output": False,
             }
 
             if args.enable_mtp_training:

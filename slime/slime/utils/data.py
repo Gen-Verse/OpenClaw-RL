@@ -271,7 +271,8 @@ def process_rollout_data(args, rollout_data_ref, dp_rank, dp_size):
     assert len(rollout_data_ref) == dp_size
     rollout_data = ray.get(rollout_data_ref[dp_rank].inner)
 
-    partition = rollout_data.pop("partition")
+    partition = list(rollout_data.pop("partition"))
+    rollout_data["_partition"] = partition
     total_lengths = rollout_data["total_lengths"]
 
     # save the seqlen of the whole rollout batch

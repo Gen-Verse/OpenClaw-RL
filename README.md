@@ -215,9 +215,7 @@ If you're interested in any of these, feel free to open an issue to discuss your
 ## 📝 Contents
 
 - [Personal OpenClaw Optimization](#personalagent)
-  - [Combination Method (Binary RL + OPD)](#combinemethod)
-  - [Binary RL](#binaryrlmethod)
-  - [On-policy Distillation](#opdmethod)
+  - [Bybrid RL](#combinemethod)
   - [Method Evaluation](#evalmethod)
 - [Agentic RL in Real World Settings](#agentrl)
   - [Terminal Agent](#terminal)
@@ -232,9 +230,8 @@ If you're interested in any of these, feel free to open an issue to discuss your
 <a id="personalagent"></a>
 ## 🔧 Personal Agent Optimization Quick Start
 
-### 1. Deployment Options
+### 1. Deployment Requirements
 
-#### Don't have any money?
 
 - **Hardware:** 8× GPUs (default; configurable via `NUM_GPUS`, `ACTOR_GPUS`, `ROLLOUT_GPUS`, `PRM_GPUS`)
 - **Software:** CUDA 12.9, Python 3.12
@@ -263,6 +260,7 @@ bash ../openclaw-combine/run_qwen3_4b_openclaw_combine_single_gpu_int4_qlora.sh
 See [`./openclaw-combine/README.md`](./openclaw-combine/README.md) for full parameter reference and [`./openclaw-test/README.md`](./openclaw-test/README.md) for single-GPU evaluation scripts.
 
 
+<!--
 
 #### Don't have a GPU?
 
@@ -278,33 +276,19 @@ Use the [Fireworks Training SDK](https://fireworks.ai). Supports full-parameter 
 
 See [`./openclaw-fireworks/README.md`](./openclaw-fireworks/README.md) for setup details.
 
-
+-->
 
 
 
 ### 2. Start the RL Server
 
-We provide three methods (RL servers):
 
-| Dimension | [Binary RL](./openclaw-rl/) | [OPD](./openclaw-opd) | [Combined](./openclaw-combine) |
-|---|---|---|---|
-| Signal type | Evaluative (good / bad) | Directional | Evaluative + directional |
-| Advantage | Sequence-level scalar | Token-level directional | Mixed sequence and token-level |
-| Density | All scored turns | Hint-accepted turns only | All scored turns |
-| Feedback type | User / environment | Explicit corrections | Both implicit and explicit feedback |
-| Signal richness | 1 scalar per sample | 1 value per token | 1 value per token |
-
-
-
-Choose your optimization method:
 
 <a id="combinemethod"></a>
-<details>
-<summary><b>Option A: Combination Method</b> — Recommended !</summary>
 
 ```bash
 cd slime
-bash ../openclaw-combine/run_qwen3_4b_openclaw_combine.sh
+bash ../openclaw-combine/run_qwen3_4b_openclaw_topk_select.sh
 ```
 
 This method combines binary RL and OPD to achieve the best optimization.
@@ -313,42 +297,8 @@ See [`./openclaw-combine/README.md`](./openclaw-combine/README.md) for algorithm
 
 
 
-</details>
 
 
-<a id="binaryrlmethod"></a>
-<details>
-<summary><b>Option B: Binary RL</b> — Best for implicit feedback (likes/dislikes, env success/failure)</summary>
-
-```bash
-cd slime
-bash ../openclaw-rl/run_qwen3_4b_openclaw_rl.sh
-```
-
-The PRM will automatically judge response quality from next-state feedback. We recommend providing frequent feedback (e.g., 👍/👎) to help the model optimize effectively.
-
-See [`./openclaw-rl/README.md`](./openclaw-rl/README.md) for algorithm details.
-
-
-</details>
-
-
-<a id="opdmethod"></a>
-<details>
-<summary><b>Option C: On-Policy Distillation (OPD)</b> — Best for rich textual feedback</summary>
-
-```bash
-cd slime
-bash ../openclaw-opd/run_qwen3_4b_openclaw_opd.sh
-```
-
-The system extracts hindsight hints from your feedback and distills them into the policy at the token level. We recommend providing concrete feedback (e.g., "you should have checked the file first" or "don't use that library").
-
-See [`./openclaw-opd/README.md`](./openclaw-opd/README.md) for algorithm details.
-
-
-
-</details>
 
 Once running, the model is served as an OpenAI-compatible API at:
 ```
@@ -363,13 +313,10 @@ We also provide an interesting case for evaluation. A student who uses OpenClaw 
 
 <a id="evalmethod"></a>
 <details>
-<summary><b>Evaluation Setting</b> — Both student and teacher use AI!</summary>
+<summary><b>Evaluation Setting</b> — Both student, TA and teacher use AI!</summary>
 
-We find that, under the combined optimization method, OpenClaw needs only 36 problem-solving interactions in the student setting and 24 grading interactions in the teacher setting to achieve a significant and clearly visible improvement.
 
-<p align="center">
-  <img src="assets/openclawrl1performance.png"  alt="Overview"  width="750">
-</p>
+<img src="assets/example.png" alt="Overview" width="750">
 
 See [`./openclaw-test/README.md`](./openclaw-test/README.md) for setup and algorithm details. Example of evaluation [results](https://github.com/Gen-Verse/OpenClaw-RL/blob/main/openclaw-test/results.txt).
 </details>
@@ -379,7 +326,7 @@ See [`./openclaw-test/README.md`](./openclaw-test/README.md) for setup and algor
 
 You can use your own openclaw, just install [this extension](https://github.com/Gen-Verse/OpenClaw-RL/tree/main/extensions/rl-training-headers).
 
-If you want local file-backed skill authoring in the bundled OpenClaw runtime, see [`openclaw/extensions/skill-bridge/README.md`](./openclaw/extensions/skill-bridge/README.md).
+
 
 <details>
 <summary><b>Then configure OpenClaw to route requests to your RL server. </b></summary>

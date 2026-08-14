@@ -17,11 +17,12 @@ export FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-/tmp}"
 
 NUM_GPUS=${NUM_GPUS:-8}
 ACTOR_GPUS=${ACTOR_GPUS:-4}
-ROLLOUT_GPUS=${ROLLOUT_GPUS:-4}
+ROLLOUT_GPUS=${ROLLOUT_GPUS:-2}
+PRM_GPUS=${PRM_GPUS:-2}
 
-if (( ACTOR_GPUS + ROLLOUT_GPUS > NUM_GPUS )); then
-    echo "ACTOR_GPUS + ROLLOUT_GPUS must be <= NUM_GPUS"
-    echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, NUM_GPUS=${NUM_GPUS}"
+if (( ACTOR_GPUS + ROLLOUT_GPUS + PRM_GPUS > NUM_GPUS )); then
+    echo "ACTOR_GPUS + ROLLOUT_GPUS + PRM_GPUS must be <= NUM_GPUS"
+    echo "ACTOR_GPUS=${ACTOR_GPUS}, ROLLOUT_GPUS=${ROLLOUT_GPUS}, PRM_GPUS=${PRM_GPUS}, NUM_GPUS=${NUM_GPUS}"
     exit 1
 fi
 
@@ -51,8 +52,10 @@ source "${SLIME_DIR}/scripts/models/qwen3.5-4B.sh"
 
 HF_CKPT=${HF_CKPT:-/data_storage/wyj/systems/huggingface/hub/Qwen35-4B}
 REF_LOAD=${REF_LOAD:-/data_storage/wyj/systems/huggingface/hub/qwen35-4b_torch_dist}
-SAVE_CKPT=${SAVE_CKPT:-/data_storage/wyj/OpenClaw-RL/ckpt/qwen35-4b-retool-rl/}
-RESUME_LOAD=${RESUME_LOAD:-${SAVE_CKPT}}
+SAVE_CKPT=${SAVE_CKPT:-/data_storage/wyj/OpenClaw-RL/ckpt/qwen35-4b-retool-prm-rl/}
+PROMPT_DATA=${PROMPT_DATA:-/data_storage/wyj/OpenClaw-RL1/data/dapo-math-17k/dapo-math-17k.jsonl}
+EVAL_DATA=${EVAL_DATA:-/data_storage/wyj/OpenClaw-RL1/data/aime-2024/aime-2024.jsonl}
+PRM_MODEL_PATH=${PRM_MODEL_PATH:-/data_storage/wyj/systems/huggingface/hub/Qwen35-4B}
 
 export SGLANG_LANGUAGE_ONLY="${SGLANG_LANGUAGE_ONLY:-1}"
 # Qwen3.5 must use the raw spec path (slime_plugins/models/qwen3_5.py) to
@@ -68,7 +71,7 @@ CKPT_ARGS=(
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data /data_storage/wyj/OpenClaw-RL1/data/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data "${PROMPT_DATA}"
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -86,7 +89,7 @@ ROLLOUT_ARGS=(
 
 EVAL_ARGS=(
    --eval-interval 20
-   --eval-prompt-data aime /data_storage/wyj/OpenClaw-RL1/data/aime-2024/aime-2024.jsonl
+   --eval-prompt-data aime "${EVAL_DATA}"
    --n-samples-per-eval-prompt 16
    --eval-max-response-len 16384
    --eval-max-context-len 32768
@@ -114,7 +117,7 @@ PERF_ARGS=(
 )
 
 GRPO_ARGS=(
-   --advantage-estimator grpo
+   --advantage-estimator step_wise
    --use-kl-loss
    --kl-loss-coef 0.01
    --kl-loss-type k3
@@ -139,7 +142,7 @@ if [[ -n "${WANDB_KEY:-}" ]]; then
    WANDB_ARGS=(
       --use-wandb
       --wandb-project "${WANDB_PROJECT:-slime_retool}"
-      --wandb-group "${WANDB_GROUP:-qwen35-4B-rl_retool}"
+      --wandb-group "${WANDB_GROUP:-qwen35-4b-retool-prm-1node}"
       --wandb-key "${WANDB_KEY}"
    )
 else
@@ -155,6 +158,17 @@ if [[ "${SGLANG_LANGUAGE_ONLY}" == "1" ]]; then
   SGLANG_ARGS+=(--sglang-language-only)
 fi
 
+PRM_ARGS=(
+   --prm-enable
+   --prm-num-gpus "${PRM_GPUS}"
+   --prm-num-gpus-per-engine 2
+   --prm-model-path "${PRM_MODEL_PATH}"
+   --prm-m "${PRM_M:-1}"
+   --prm-step-coef "${PRM_STEP_COEF:-1.0}"
+   --prm-temperature "${PRM_TEMPERATURE:-0.6}"
+   --prm-max-new-tokens "${PRM_MAX_NEW_TOKENS:-8192}"
+)
+
 MISC_ARGS=(
    --attention-dropout 0.0
    --hidden-dropout 0.0
@@ -167,6 +181,11 @@ CUSTOM_ARGS=(
    --custom-generate-function-path generate_with_retool.generate
    --custom-rm-path generate_with_retool.reward_func
 )
+
+DYNAMIC_HISTORY_ARGS=()
+if [[ "${DYNAMIC_HISTORY:-0}" == "1" ]]; then
+  DYNAMIC_HISTORY_ARGS+=(--dynamic_history)
+fi
 
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-"max_split_size_mb:2048,expandable_segments:True"}
 
@@ -191,6 +210,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    --actor-num-nodes 1 \
    --actor-num-gpus-per-node "${ACTOR_GPUS}" \
    --rollout-num-gpus "${ROLLOUT_GPUS}" \
+   --num-gpus-per-node "${NUM_GPUS}" \
    ${MODEL_ARGS[@]} \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
@@ -201,4 +221,6 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${EVAL_ARGS[@]} \
    ${SGLANG_ARGS[@]} \
    ${MISC_ARGS[@]} \
-   ${CUSTOM_ARGS[@]}
+   ${CUSTOM_ARGS[@]} \
+   ${PRM_ARGS[@]} \
+   ${DYNAMIC_HISTORY_ARGS[@]}

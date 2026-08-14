@@ -1,14 +1,6 @@
 # OpenClaw-Test: End-to-End Evaluation for OpenClaw-RL Training Methods
 
-This directory contains an automated evaluation suite that tests the **real-world effectiveness** of models trained with the three OpenClaw-RL optimization methods:
-
-| Method | Directory | Signal Type |
-|---|---|---|
-| **Combined (RL + OPD)** | `openclaw-combine/` | Weighted combination of both signals |
-| **Binary RL (GRPO)** | `openclaw-rl/` | Scalar reward (+1/−1/0) via PRM majority voting |
-| **On-Policy Distillation (OPD)** | `openclaw-opd/` | Token-level directional signal from hindsight hints |
-
-We recommend using **Combined (RL + OPD)**.
+This directory contains an automated evaluation suite that tests the **real-world effectiveness** of models trained with OpenClaw-RL method.
 
 ## What Does This Test Do?
 
@@ -21,7 +13,7 @@ The evaluation simulates a realistic multi-turn agentic workflow using **GSM8K m
 - Grade existing solutions against ground truth
 - Produce detailed, friendly feedback
 
-The test consists of **two sequential phases**:
+The test consists of **three sequential phases** (you can also run them together, but you need to obtain homework1 and homework2 first if you want to try this joint optimization):
 
 ### Phase 1: Student Chat (`student_chat.py`)
 
@@ -35,19 +27,33 @@ An external LLM role-plays as a **lazy student** who asks the OpenClaw agent to 
 
 This phase tests the agent's **instruction following**, **math reasoning**, **file I/O**, and **style adaptation** abilities.
 
-### Phase 2: Teacher Chat (`teacher_chat.py`)
+### Phase 2: TA Chat (`TA_chat.py`)
 
-An external LLM role-plays as a **teacher** who grades the student's submissions. For each problem:
+An external LLM role-plays as a **TA** who grades the student's submissions. For each problem:
 
-1. The teacher provides the original question and ground truth answer to the agent.
-2. The agent reads the student's submission from `homework/i.txt`, compares it with the correct answer, and writes grading comments.
-3. If the comments are too brief or not friendly enough, the teacher asks for a rewrite.
-4. Once satisfied, the teacher asks the agent to append the comments to the file.
-5. The teacher says `GRADING_DONE` to end the session.
+1. If needed, `homework/` is copied to `homework1/` in the OpenClaw workspace.
+2. The TA provides the original question and ground truth answer to the agent.
+3. The agent reads the student's submission from `homework1/i.txt`, compares it with the correct answer, and writes grading comments.
+4. If the comments are too brief or not specific enough, the TA asks for a rewrite.
+5. Once satisfied, the TA asks the agent to append the comments to the file.
+6. The TA says `GRADING_DONE` to end the session.
 
-This phase tests the agent's **reading comprehension**, **evaluation accuracy**, **feedback quality**, and **multi-step file operations**.
+This phase tests the agent's **reading comprehension**, **evaluation accuracy**, **feedback specificity**, and **multi-step file operations**.
 
-> **Run order matters:** Run `student_chat.py` first so the homework files contain student solutions, then run `teacher_chat.py` to grade them.
+### Phase 3: Teacher Chat (`teacher_chat.py`)
+
+An external LLM role-plays as a **teacher** who reviews the already graded homework and writes comments about the student's strengths and weaknesses. For each problem:
+
+1. If needed, `homework1/` is copied to `homework2/` in the OpenClaw workspace.
+2. The teacher provides the original question and ground truth answer to the agent.
+3. The agent reads the graded submission from `homework2/i.txt` and writes friendly, patient feedback about strengths and weaknesses.
+4. If the comments are not friendly or patient enough, the teacher asks for a rewrite.
+5. Once satisfied, the teacher asks the agent to append the comments to the file.
+6. The teacher says `COMMENT_DONE` to end the session.
+
+This phase tests the agent's **review quality**, **tone control**, **supportive feedback**, and **multi-step file operations**.
+
+> **Run order matters:** Run `student_chat.py` first so the homework files contain student solutions, then run `TA_chat.py` to grade them, then run `teacher_chat.py` to add teacher comments.
 
 ---
 
@@ -56,19 +62,20 @@ This phase tests the agent's **reading comprehension**, **evaluation accuracy**,
 ```
 ┌─────────────────────┐         ┌───────────────────────────────┐
 │   External LLM      │         │      OpenClaw RL Server       │
-│  (Student/Teacher)   │         │   (your trained model)        │
+│ (Student/TA/Teacher) │         │   (your trained model)        │
 │  Port 30001         │         │   Port 30000                  │
 │  via launch_user_   │         │   via openclaw-rl/opd/combine │
 │  llm.sh or closed-  │         │   shell scripts               │
 │  source API          │         │                               │
 └────────┬────────────┘         └──────────┬────────────────────┘
          │                                 │
-         │  student/teacher messages        │  agent responses
+         │ student/TA/teacher messages      │  agent responses
          │                                 │
          └──────────┐     ┌────────────────┘
                     ▼     ▼
               ┌──────────────────┐
               │  student_chat.py │
+              │  TA_chat.py      │
               │  teacher_chat.py │
               │  (orchestrator)  │
               └──────────────────┘
@@ -84,9 +91,9 @@ This phase tests the agent's **reading comprehension**, **evaluation accuracy**,
 - Python 3.12 with `requests` and `openai` packages installed
 - A `GSM8K.json` dataset file (JSON array with `question` and `ground_truth_answer` fields per entry)
 
-### Step 1: Host the External LLM (Student/Teacher)
+### Step 1: Host the External LLM (Student/TA/Teacher)
 
-The external LLM acts as the "user" (student or teacher) that drives the conversation. You have two options:
+The external LLM acts as the "user" (student, TA, or teacher) that drives the conversation. You have two options:
 
 #### Option A: Self-hosted model via SGLang
 
@@ -111,15 +118,8 @@ Launch the RL server with the trained model you want to evaluate. Choose the met
 
 ```bash
 cd slime
+bash ../openclaw-combine/run_qwen3_4b_openclaw_topk_select.sh
 ```
-
-**Combined (RL + OPD):**
-```bash
-bash ../openclaw-combine/run_qwen3_4b_openclaw_combine.sh      # Qwen3
-```
-
-
-> **Eval mode:** To enable evaluation logging with W&B, set `OPENCLAW_EVAL_MODE=1` and provide your W&B key via `WANDB_KEY` before launching. This is already the default in the OPD and Combine scripts.
 
 The RL server will be available at `http://0.0.0.0:30000/v1` by default.
 
@@ -148,15 +148,31 @@ python student_chat.py \
 This will:
 1. Write 36 GSM8K problems to `homework/0.txt` through `homework/35.txt` in the workspace.
 2. For each problem, run a multi-turn conversation where the student LLM asks the OpenClaw agent to solve it.
-3. Print a summary of how many problems were completed within the turn limit.
-4. Return a results.txt which records the OpenClaw's first output in each session. For example, [results.txt](https://github.com/Gen-Verse/OpenClaw-RL/blob/main/openclaw-test/results.txt) records the transition of output pattern when using [run_qwen3_4b_openclaw_combine.sh](https://github.com/Gen-Verse/OpenClaw-RL/blob/main/openclaw-combine/run_qwen3_4b_openclaw_combine.sh).
+3. Save the first OpenClaw reply for each problem to `results_student.txt` by default.
+4. Print a summary of how many problems were completed within the turn limit.
 
+### Step 4: Run the TA Test
 
+After all student submissions are done, run the TA to grade them:
 
+```bash
+# Same environment variables as above
 
-### Step 4: Run the Teacher Test
+python TA_chat.py \
+    --dataset GSM8K.json \
+    --num-problems 36 \
+    --max-turns 8
+```
 
-After all student submissions are done, run the teacher to grade them:
+This will:
+1. Copy `homework/` to `homework1/` if `homework1/` does not already exist.
+2. For each problem, the TA LLM asks the OpenClaw agent to read the student's submission, compare it with the ground truth, and write grading comments.
+3. Save the first OpenClaw reply for each problem to `results_TA.txt` by default.
+4. Print a summary of how many problems were graded within the turn limit.
+
+### Step 5: Run the Teacher Test
+
+After grading is done, run the teacher to add strengths and weaknesses comments:
 
 ```bash
 # Same environment variables as above
@@ -168,27 +184,39 @@ python teacher_chat.py \
 ```
 
 This will:
-1. For each problem, the teacher LLM asks the OpenClaw agent to read the student's submission, compare with the ground truth, and write grading comments.
-2. Print a summary of how many problems were graded within the turn limit.
+1. Copy `homework1/` to `homework2/` if `homework2/` does not already exist.
+2. For each problem, the teacher LLM asks the OpenClaw agent to review the graded homework and write friendly strengths and weaknesses comments.
+3. Save the first OpenClaw reply for each problem to `results_teacher.txt` by default.
+4. Print a summary of how many problems were commented on within the turn limit.
 
 ---
 
 ## Command-Line Arguments
 
-Both `student_chat.py` and `teacher_chat.py` accept the same arguments:
+`student_chat.py`, `TA_chat.py`, and `teacher_chat.py` accept the same arguments:
 
 | Argument | Default | Description |
 |---|---|---|
 | `--dataset` | *(required)* | Path to the GSM8K JSON file |
 | `--num-problems` | `5` | Number of problems to process |
 | `--max-turns` | `8` | Maximum conversation turns per problem |
+| `--max-retries` | `3` | Maximum retries per network call |
+| `--output` | See below | Output file for the first OpenClaw reply from each problem |
+
+Default output files:
+
+| Script | Default output |
+|---|---|
+| `student_chat.py` | `results_student.txt` |
+| `TA_chat.py` | `results_TA.txt` |
+| `teacher_chat.py` | `results_teacher.txt` |
 
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `OPENCLAW_GATEWAY_TOKEN` | Yes | — | Auth token for the OpenClaw gateway |
-| `OPENAI_API_KEY` | Yes | — | API key for the external LLM (student/teacher) |
+| `OPENAI_API_KEY` | Yes | — | API key for the external LLM (student/TA/teacher) |
 | `OPENCLAW_GATEWAY_URL` | No | `http://localhost:18789` | OpenClaw gateway base URL |
 | `OPENCLAW_WORKSPACE` | No | `~/.openclaw/workspace` | Path to the OpenClaw workspace directory |
 | `OPENAI_BASE_URL` | No | *(OpenAI default)* | Base URL for the external LLM API |
@@ -206,7 +234,8 @@ openclaw-test/
 ├── launch_user_llm.sh     # Script to host the external LLM via SGLang
 ├── student_chat.py        # Phase 1: Student asks agent to solve homework
 ├── student_chat_single_gpu.py  # Single-GPU variant (SGLang offload-aware)
-├── teacher_chat.py        # Phase 2: Teacher asks agent to grade homework
+├── TA_chat.py             # Phase 2: TA asks agent to grade homework
+├── teacher_chat.py        # Phase 3: Teacher asks agent to comment on strengths and weaknesses
 ├── teacher_chat_single_gpu.py  # Single-GPU variant (SGLang offload-aware)
 └── GSM8K.json             # Dataset (to be placed here)
 ```

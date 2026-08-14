@@ -532,8 +532,18 @@ def log_rollout_data(
                 "step_wise_step_indices",
                 "teacher_topk_log_probs",
                 "teacher_topk_indices",
+                "prm_teacher_topk_log_probs",
+                "prm_teacher_topk_indices",
+                "prm_teacher_log_probs_cand",
+                "prm_teacher_topk_log_probs_cand",
+                "prm_teacher_topk_indices_cand",
+                "prm_teacher_native_topk_indices_cand",
+                "topk_log_probs",
+                "topk_indices",
                 "teacher_tokens",
                 "teacher_total_lengths",
+                "teacher_tokens_candidates",
+                "teacher_total_lengths_candidates",
             ]:
                 continue
             # Upload per sample mean for each rollout value

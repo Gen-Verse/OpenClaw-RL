@@ -171,14 +171,14 @@ def patch_sglang_qwen35() -> None:
                     continue
                 if "language_model" in name:
                     name = name.replace(r"model.language_model.", r"model.")
+                # SGLang's Qwen3.5 full-attention layer registers `qkv_proj`,
+                # `o_proj`, `q_norm`, `k_norm` etc. as direct attributes of the
+                # decoder layer (not under a `self_attn` submodule). Megatron
+                # emits HF-style names with `.self_attn.` so we must strip it
+                # to match the actual params_dict tree. Linear-attention layers
+                # use `.linear_attn.` and are unaffected.
                 if ".self_attn." in name:
                     name = name.replace(".self_attn", "")
-                if not name.startswith("model.") and (
-                    name.startswith("layers.")
-                    or name.startswith("embed_tokens.")
-                    or name.startswith("norm.")
-                ):
-                    name = add_prefix(name, "model")
 
                 if name == "model.embed_tokens.weight":
                     if self.pp_group.is_last_rank and self.config.tie_word_embeddings:

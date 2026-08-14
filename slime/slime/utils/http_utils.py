@@ -162,8 +162,23 @@ def _next_actor():
     return actor
 
 
+_PERMANENT_ROUTER_MARKERS = (
+    "no_available_workers",
+    "all circuits open",
+    "circuits open or unhealthy",
+)
+# After this many *consecutive* permanent-looking 503s from the router, give
+# up retrying so the real engine-side exception surfaces instead of being
+# drowned by minutes of identical "retrying..." log lines.
+_PERMANENT_FAIL_FAST_AFTER = int(os.getenv("SLIME_HTTP_PERMANENT_FAIL_FAST", "3"))
+# Only log retries at these attempt numbers (plus the final one) so the
+# terminal is not flooded with one line per attempt per concurrent request.
+_LOG_RETRY_ATTEMPTS = {1, 5, 10, 25, 50}
+
+
 async def _post(client, url, payload, max_retries=60):
     retry_count = 0
+    permanent_streak = 0
     while retry_count < max_retries:
         response = None
         try:
@@ -179,12 +194,45 @@ async def _post(client, url, payload, max_retries=60):
 
             if isinstance(e, httpx.HTTPStatusError):
                 response_text = e.response.text
+                status_code = e.response.status_code
             else:
                 response_text = None
+                status_code = None
 
-            logger.info(
-                f"Error: {e}, retrying... (attempt {retry_count}/{max_retries}, url={url}, response={response_text})"
+            is_permanent = (
+                status_code == 503
+                and response_text is not None
+                and any(m in response_text for m in _PERMANENT_ROUTER_MARKERS)
             )
+            if is_permanent:
+                permanent_streak += 1
+            else:
+                permanent_streak = 0
+
+            should_log = (
+                retry_count in _LOG_RETRY_ATTEMPTS
+                or retry_count >= max_retries
+                or (is_permanent and permanent_streak == _PERMANENT_FAIL_FAST_AFTER)
+            )
+            if should_log:
+                logger.info(
+                    f"Error: {e}, retrying... (attempt {retry_count}/{max_retries}, url={url}, response={response_text})"
+                )
+
+            if is_permanent and permanent_streak >= _PERMANENT_FAIL_FAST_AFTER:
+                logger.error(
+                    "SGLang router returned a permanent 'no_available_workers' "
+                    f"503 {permanent_streak}x in a row for {url}. The engine "
+                    "subprocess behind the router has almost certainly crashed; "
+                    f"skipping the remaining {max_retries - retry_count} retries "
+                    "so the real failure surfaces. Inspect "
+                    "`/tmp/ray/session_latest/logs/worker-*02000000*.{out,err}` "
+                    "for the underlying traceback (CUDA OOM, NCCL, assertion, "
+                    "etc.). Set SLIME_HTTP_PERMANENT_FAIL_FAST=0 to disable "
+                    "this fast-fail and restore the original 60-retry behaviour."
+                )
+                raise
+
             if retry_count >= max_retries:
                 logger.info(f"Max retries ({max_retries}) reached, failing... (url={url})")
                 raise e

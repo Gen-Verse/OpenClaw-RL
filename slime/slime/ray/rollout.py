@@ -731,6 +731,20 @@ class RolloutManager:
             train_data["teacher_tokens"] = [sample.teacher_tokens for sample in samples]
             train_data["teacher_total_lengths"] = [len(sample.teacher_tokens) for sample in samples]
 
+        # Multi-candidate teacher tokens (retool-hybrid-select path).  Each
+        # sample carries a (possibly empty) list of K_i hint-enhanced token
+        # sequences.  Padding to a uniform K across the batch happens later
+        # inside the PRM-teacher actor's K-loop (compute_prm_teacher_log_probs);
+        # here we just transport the per-sample list of lists.
+        if "teacher_tokens_candidates" in samples[0].__dict__:
+            train_data["teacher_tokens_candidates"] = [
+                sample.teacher_tokens_candidates for sample in samples
+            ]
+            train_data["teacher_total_lengths_candidates"] = [
+                [len(t) for t in sample.teacher_tokens_candidates]
+                for sample in samples
+            ]
+
         if "teacher_topk_log_probs" in samples[0].__dict__:
             train_data["teacher_topk_log_probs"] = [sample.teacher_topk_log_probs for sample in samples]
 
@@ -789,6 +803,8 @@ class RolloutManager:
                 "teacher_log_probs",
                 "teacher_tokens",
                 "teacher_total_lengths",
+                "teacher_tokens_candidates",
+                "teacher_total_lengths_candidates",
                 "teacher_topk_log_probs",
                 "teacher_topk_indices",
                 "step_wise_step_rewards",

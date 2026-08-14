@@ -238,7 +238,7 @@ def main():
     parser.add_argument("--num-problems", type=int, default=5, help="Number of problems to run (default: 5)")
     parser.add_argument("--max-turns", type=int, default=8, help="Max turns per problem (default: 8)")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per network call (default: 3)")
-    parser.add_argument("--output", type=str, default="results.txt", help="Output file for OpenClaw replies (default: results.txt)")
+    parser.add_argument("--output", type=str, default="results_student.txt", help="Output file for OpenClaw replies (default: results_student.txt)")
     args = parser.parse_args()
 
     gateway_token = get_env_or_exit("OPENCLAW_GATEWAY_TOKEN")

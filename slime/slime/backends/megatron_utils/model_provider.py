@@ -104,6 +104,85 @@ def get_model_provider_func(
             provider.num_layers_in_first_pipeline_stage = args.decoder_first_pipeline_num_layers
         if getattr(args, "decoder_last_pipeline_num_layers", None) is not None:
             provider.num_layers_in_last_pipeline_stage = args.decoder_last_pipeline_num_layers
+        # Bridge providers are constructed from HF config and ignore most CLI flags
+        # forwarded to TransformerConfig in the raw path. Activation-recompute is
+        # the most consequential one: without it, full activations stay resident
+        # for every layer and large-context RL runs OOM. Forward it explicitly so
+        # bridge runs are at least memory-comparable to raw runs.
+        # Qwen3-VL bridge providers with deepstack visual features cannot use
+        # full-layer checkpointing: the upstream checkpoint path passes
+        # deepstack_visual_embeds as list[Tensor] into save_for_backward().
+        skip_full_recompute = (
+            getattr(args, "recompute_granularity", None) == "full"
+            and bool(getattr(provider, "deepstack_visual_indexes", None))
+        )
+        if skip_full_recompute:
+            print(
+                "Bridge provider: skipped full activation recompute for "
+                f"{type(provider).__name__} with deepstack visual features"
+            )
+        elif getattr(args, "recompute_granularity", None) is not None:
+            provider.recompute_granularity = args.recompute_granularity
+            provider.recompute_method = args.recompute_method
+            provider.recompute_num_layers = args.recompute_num_layers
+
+        # CLI flags that materially affect train numerics/quality and per-step
+        # speed but are NOT derivable from the HF config. Without these, bridge
+        # mode silently keeps HF-config defaults (e.g. attention_dropout=0.1
+        # for many Qwen configs), which causes train-vs-inference distribution
+        # skew and biased GRPO importance sampling. Forward only attributes the
+        # provider already exposes so we don't break providers that omit them.
+        _BRIDGE_FORWARDED_ARGS = (
+            # numerics / quality
+            "attention_dropout",
+            "hidden_dropout",
+            "attention_softmax_in_fp32",
+            
+            "accumulate_allreduce_grads_in_fp32",
+            "fp16_lm_cross_entropy",
+            "cross_entropy_loss_fusion",
+            "cross_entropy_fusion_impl",
+            # kernels / fused ops (perf, occasionally numerics)
+            "attention_backend",
+            "apply_rope_fusion",
+            "bias_swiglu_fusion",
+            "bias_dropout_fusion",
+            "bias_gelu_fusion",
+            "masked_softmax_fusion",
+            "gradient_accumulation_fusion",
+            "async_tensor_model_parallel_allreduce",
+            "tp_comm_overlap",
+            # context-parallel / sequence-parallel related
+            "context_parallel_size",
+            # dtype / precision
+            "params_dtype",
+            "bf16",
+            "fp16",
+        )
+        forwarded = []
+        skipped = []
+        for name in _BRIDGE_FORWARDED_ARGS:
+            if not hasattr(args, name):
+                continue
+            value = getattr(args, name)
+            if value is None:
+                continue
+            if not hasattr(provider, name):
+                skipped.append(name)
+                continue
+            setattr(provider, name, value)
+            forwarded.append((name, value))
+        if forwarded:
+            print(
+                "Bridge provider: forwarded CLI flags -> "
+                + ", ".join(f"{n}={v}" for n, v in forwarded)
+            )
+        if skipped:
+            print(
+                "Bridge provider: skipped CLI flags not exposed by provider -> "
+                + ", ".join(skipped)
+            )
+
         provider.finalize()
         return provider.provide
 

@@ -12,6 +12,35 @@ from slime.utils.distributed_utils import distributed_masked_whiten
 from slime.utils.misc import load_function
 
 logger = logging.getLogger(__name__)
+
+# Module-level toggle. When True, get_log_probs_and_entropy additionally
+# returns "topk_log_probs" / "topk_indices" (used by the prm_teacher actor
+# path for distillation). Defaults to False so that the regular old_actor
+# / ref / actor compute_log_prob passes are unchanged.
+_EMIT_TOPK_LOGPROBS: bool = False
+
+
+class emit_topk_logprobs:
+    """Context manager: opt the wrapped compute_log_prob call into emitting
+    per-token top-K log-probabilities and global vocab indices.
+
+    Only the prm_teacher actor uses this; the regular actor/old_actor/ref
+    forwards do NOT enter this context, so their output dicts are byte-
+    identical to before.
+    """
+
+    def __enter__(self):
+        global _EMIT_TOPK_LOGPROBS
+        self._prev = _EMIT_TOPK_LOGPROBS
+        _EMIT_TOPK_LOGPROBS = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _EMIT_TOPK_LOGPROBS
+        _EMIT_TOPK_LOGPROBS = self._prev
+        return False
+
+
 from slime.utils.ppo_utils import (
     calculate_log_probs_and_entropy,
     compute_approx_kl,
@@ -172,8 +201,16 @@ def get_log_probs_and_entropy(
         a list of `[R]` tensors.
     """
     assert non_loss_data
+    tp_group = mpu.get_tensor_model_parallel_group()
+    # Top-K is opt-in via emit_topk_logprobs() context manager. By default
+    # the regular old_actor / ref / actor compute_log_prob passes do NOT
+    # emit top-K data, so their outputs are unchanged. Only the prm_teacher
+    # path opts in (see actor.compute_prm_teacher_log_probs).
+    distill_topk = int(getattr(args, "distill_topk", 0) or 0) if _EMIT_TOPK_LOGPROBS else 0
     log_probs_list = []
     entropy_list = []
+    topk_log_probs_list = []
+    topk_indices_list = []
     for logits_chunk, tokens_chunk in get_responses(
         logits,
         args=args,
@@ -185,7 +222,7 @@ def get_log_probs_and_entropy(
         log_prob, entropy = calculate_log_probs_and_entropy(
             logits_chunk,
             tokens_chunk,
-            mpu.get_tensor_model_parallel_group(),
+            tp_group,
             with_entropy=with_entropy,
             chunk_size=args.log_probs_chunk_size,
         )
@@ -193,12 +230,273 @@ def get_log_probs_and_entropy(
         log_probs_list.append(log_prob.squeeze(-1))
         entropy_list.append(entropy)
 
+        if distill_topk > 0:
+            topk_lp, topk_idx = _vocab_parallel_topk_log_probs(logits_chunk, distill_topk, tp_group)
+            topk_log_probs_list.append(topk_lp)
+            topk_indices_list.append(topk_idx)
+
     res = {
         "log_probs": log_probs_list,
     }
     if with_entropy:
         res["entropy"] = entropy_list
+    if distill_topk > 0:
+        res["topk_log_probs"] = topk_log_probs_list
+        res["topk_indices"] = topk_indices_list
     return torch.empty((0,), device=logits.device), res
+
+
+def _vocab_parallel_topk_log_probs(
+    logits: torch.Tensor,
+    K: int,
+    tp_group,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Global top-K log-probs and (global vocab) indices from TP-sharded logits.
+
+    Args:
+        logits: ``[seq, vocab_local]`` (vocab_local = vocab // tp_world).
+        K: global top-K to keep.
+        tp_group: TP process group.
+
+    Returns:
+        ``(topk_log_probs [seq, K], topk_indices [seq, K])`` with indices in
+        the GLOBAL vocab space, so any TP rank can re-gather log-probs at
+        them with ``compute_log_probs``.
+    """
+    if K <= 0 or logits.numel() == 0:
+        return (
+            logits.new_zeros((logits.size(0), 0)),
+            torch.zeros((logits.size(0), 0), dtype=torch.long, device=logits.device),
+        )
+
+    tp_world = dist.get_world_size(group=tp_group) if dist.is_initialized() else 1
+    tp_rank = dist.get_rank(group=tp_group) if dist.is_initialized() else 0
+    vocab_local = logits.size(-1)
+
+    # Global log-softmax across TP-sharded vocab (kept in fp32 for safety;
+    # logits may arrive as bf16/fp16).
+    work = logits.float()
+    local_max = work.max(dim=-1, keepdim=True).values
+    if tp_world > 1:
+        dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=tp_group)
+    shifted = work - local_max
+    sum_exp = shifted.exp().sum(dim=-1, keepdim=True)
+    if tp_world > 1:
+        dist.all_reduce(sum_exp, op=dist.ReduceOp.SUM, group=tp_group)
+    log_probs_local = shifted - sum_exp.log()
+
+    K_local = min(K, vocab_local)
+    local_lp, local_idx_local = log_probs_local.topk(K_local, dim=-1)
+    local_idx_global = local_idx_local + tp_rank * vocab_local
+
+    if tp_world == 1:
+        return local_lp, local_idx_global
+
+    # Gather every shard's local top-K, then global top-K from K_local*tp_world
+    # candidates. Exact: any global top-K token is in some shard's top-K_local.
+    gathered_lp = [torch.zeros_like(local_lp) for _ in range(tp_world)]
+    gathered_idx = [torch.zeros_like(local_idx_global) for _ in range(tp_world)]
+    dist.all_gather(gathered_lp, local_lp, group=tp_group)
+    dist.all_gather(gathered_idx, local_idx_global, group=tp_group)
+    cat_lp = torch.cat(gathered_lp, dim=-1)
+    cat_idx = torch.cat(gathered_idx, dim=-1)
+    K_eff = min(K, cat_lp.size(-1))
+    final_lp, sort_pos = cat_lp.topk(K_eff, dim=-1)
+    final_idx = torch.gather(cat_idx, -1, sort_pos)
+    return final_lp, final_idx
+
+
+# Per-call indices payload for the gather-at-indices forward path. A list
+# of [R_i, K] long tensors (one per sample), GLOBAL vocab ids. Set just
+# before calling forward_only(gather_log_probs_at_indices, ...) and read
+# inside that function. Module-level (not threadlocal) because Megatron's
+# pipeline runner is single-threaded per actor process.
+_GATHER_AT_INDICES_PAYLOAD: list[torch.Tensor] | None = None
+_GATHER_AT_INDICES_CURSOR: int = 0
+
+# When >0, gather_log_probs_at_indices ALSO computes the teacher's native
+# top-K indices on the same logits chunk (no extra forward pass) and
+# returns them under "topk_native_indices". This lets the multi-candidate
+# student-mode K-loop carry the candidate's own top-K to the loss as a
+# selection signal alongside the gathered log-probs at the student's S^q.
+# Default 0 leaves the existing single-candidate path byte-identical.
+_EMIT_NATIVE_TOPK_K: int = 0
+
+
+class emit_native_topk_indices:
+    """Context manager: ALSO emit teacher's native top-K indices in the
+    gather-at-indices forward.
+
+    Args:
+        K: native top-K width to compute on each logits chunk; if ``K<=0``
+           the augmentation is disabled.
+
+    Used by the multi-candidate path in ``--distill-subset-mode student``:
+    the teacher's log-probs are gathered at the student's top-K (so values
+    at S^q are valid for the loss), and the candidate's own native top-K
+    indices ride alongside as a side channel for the per-token / per-step
+    overlap selection in the loss.
+    """
+
+    def __init__(self, K: int):
+        self._K = int(K)
+
+    def __enter__(self):
+        global _EMIT_NATIVE_TOPK_K
+        self._prev = _EMIT_NATIVE_TOPK_K
+        _EMIT_NATIVE_TOPK_K = max(0, self._K)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _EMIT_NATIVE_TOPK_K
+        _EMIT_NATIVE_TOPK_K = self._prev
+        return False
+
+
+class set_gather_at_indices:
+    """Context manager: provide a list[Tensor] of GLOBAL vocab ids per sample.
+
+    The next ``len(payload)`` calls to ``gather_log_probs_at_indices`` (one
+    per response chunk in pipeline order) consume one tensor each. Used to
+    drive the extra "gather at S_t" forwards needed by ``--distill-subset-
+    mode={student,teacher}`` distillation.
+    """
+
+    def __init__(self, payload: list[torch.Tensor]):
+        self._payload = payload
+
+    def __enter__(self):
+        global _GATHER_AT_INDICES_PAYLOAD, _GATHER_AT_INDICES_CURSOR
+        self._prev_payload = _GATHER_AT_INDICES_PAYLOAD
+        self._prev_cursor = _GATHER_AT_INDICES_CURSOR
+        _GATHER_AT_INDICES_PAYLOAD = self._payload
+        _GATHER_AT_INDICES_CURSOR = 0
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        global _GATHER_AT_INDICES_PAYLOAD, _GATHER_AT_INDICES_CURSOR
+        _GATHER_AT_INDICES_PAYLOAD = self._prev_payload
+        _GATHER_AT_INDICES_CURSOR = self._prev_cursor
+        return False
+
+
+def _vocab_parallel_log_probs_at_indices(
+    logits: torch.Tensor,
+    indices: torch.Tensor,
+    tp_group,
+) -> torch.Tensor:
+    """No-grad: GLOBAL log-probs at given GLOBAL vocab indices, TP-sharded.
+
+    Args:
+        logits:  ``[seq, V_local]``.
+        indices: ``[seq, K]`` global vocab ids in ``[0, V)``.
+
+    Returns:
+        ``[seq, K]`` fp32 ``log softmax(logits_global)[indices]``.
+    """
+    if logits.numel() == 0 or indices.numel() == 0:
+        return logits.new_zeros((logits.size(0), indices.size(-1) if indices.dim() > 1 else 0), dtype=torch.float32)
+
+    tp_world = dist.get_world_size(group=tp_group) if dist.is_initialized() else 1
+    tp_rank = dist.get_rank(group=tp_group) if dist.is_initialized() else 0
+    V_local = logits.size(-1)
+    shard_lo = tp_rank * V_local
+
+    work = logits.float()
+    local_max = work.max(dim=-1, keepdim=True).values
+    if tp_world > 1:
+        dist.all_reduce(local_max, op=dist.ReduceOp.MAX, group=tp_group)
+    shifted = work - local_max
+    sum_exp = shifted.exp().sum(dim=-1, keepdim=True)
+    if tp_world > 1:
+        dist.all_reduce(sum_exp, op=dist.ReduceOp.SUM, group=tp_group)
+    log_sum_exp = sum_exp.log()  # [seq, 1] fp32
+
+    in_shard = (indices >= shard_lo) & (indices < shard_lo + V_local)
+    idx_local = (indices - shard_lo).clamp(min=0, max=V_local - 1)
+    gathered = torch.gather(work, dim=-1, index=idx_local)  # [seq, K] fp32
+    gathered_masked = torch.where(in_shard, gathered, torch.zeros_like(gathered))
+    if tp_world > 1:
+        dist.all_reduce(gathered_masked, op=dist.ReduceOp.SUM, group=tp_group)
+    return gathered_masked - log_sum_exp
+
+
+def gather_log_probs_at_indices(
+    logits: torch.Tensor,
+    *,
+    args: Namespace,
+    unconcat_tokens: list[torch.Tensor],
+    total_lengths: list[int],
+    response_lengths: list[int],
+    with_entropy: bool = False,
+    non_loss_data: bool = True,
+    max_seq_lens: list[int] | None = None,
+) -> tuple[torch.Tensor, dict[str, list[torch.Tensor]]]:
+    """No-grad: gather GLOBAL log-probs at indices supplied via ``set_gather_at_indices``.
+
+    Mirrors ``get_log_probs_and_entropy``'s signature so it slots into the
+    same ``forward_only`` codepath. Returns a dict with two keys:
+
+    * ``topk_log_probs``: list of ``[R_i, K]`` fp32 log-probs per sample.
+    * ``topk_indices``:   list of ``[R_i, K]`` long indices per sample
+      (echoed from the payload for downstream consumers).
+
+    When ``emit_native_topk_indices(K)`` is active, additionally returns:
+
+    * ``topk_native_indices``: list of ``[R_i, K]`` long indices per sample
+      holding the model's *own* global top-K indices on the same logits
+      chunk. Computed in the same forward (no extra pass).
+    """
+    assert non_loss_data
+    global _GATHER_AT_INDICES_PAYLOAD, _GATHER_AT_INDICES_CURSOR
+    payload = _GATHER_AT_INDICES_PAYLOAD
+    if payload is None:
+        raise RuntimeError(
+            "gather_log_probs_at_indices called outside set_gather_at_indices() context."
+        )
+    tp_group = mpu.get_tensor_model_parallel_group()
+    native_K = int(_EMIT_NATIVE_TOPK_K)
+    log_probs_list: list[torch.Tensor] = []
+    indices_list: list[torch.Tensor] = []
+    native_indices_list: list[torch.Tensor] = []
+    for logits_chunk, _tokens_chunk in get_responses(
+        logits,
+        args=args,
+        unconcat_tokens=unconcat_tokens,
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        max_seq_lens=max_seq_lens,
+    ):
+        if _GATHER_AT_INDICES_CURSOR >= len(payload):
+            raise RuntimeError(
+                f"gather_log_probs_at_indices: payload exhausted at cursor "
+                f"{_GATHER_AT_INDICES_CURSOR} (payload len={len(payload)})."
+            )
+        idx_cpu = payload[_GATHER_AT_INDICES_CURSOR]
+        _GATHER_AT_INDICES_CURSOR += 1
+        idx = idx_cpu.to(device=logits_chunk.device, dtype=torch.long)
+        if idx.dim() == 1:
+            idx = idx.unsqueeze(-1)
+        if idx.size(0) != logits_chunk.size(0):
+            raise RuntimeError(
+                f"gather_log_probs_at_indices: chunk has {logits_chunk.size(0)} "
+                f"tokens but payload has {idx.size(0)} index rows."
+            )
+        lp = _vocab_parallel_log_probs_at_indices(logits_chunk, idx, tp_group)
+        log_probs_list.append(lp)
+        indices_list.append(idx)
+        if native_K > 0:
+            _, native_idx = _vocab_parallel_topk_log_probs(
+                logits_chunk, native_K, tp_group
+            )
+            native_indices_list.append(native_idx)
+    out = {
+        "topk_log_probs": log_probs_list,
+        "topk_indices": indices_list,
+    }
+    if native_K > 0:
+        out["topk_native_indices"] = native_indices_list
+    return torch.empty((0,), device=logits.device), out
 
 
 def get_values(

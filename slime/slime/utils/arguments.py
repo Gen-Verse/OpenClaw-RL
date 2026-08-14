@@ -781,6 +781,48 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=1,
                 help="Number of GPUs for the PRM teacher model (default 1, TP=1).",
             )
+            parser.add_argument(
+                "--prm-teacher-rotary-base",
+                type=float,
+                default=None,
+                help=(
+                    "Override --rotary-base for the PRM teacher only. Use when the teacher and "
+                    "the actor have different rope_theta (e.g. stock Qwen3-4B rope_theta=1e6 "
+                    "vs a long-context SFT fine-tune with rope_theta=5e6). "
+                    "Defaults to --rotary-base when unset."
+                ),
+            )
+            parser.add_argument(
+                "--prm-teacher-megatron-to-hf-mode",
+                choices=["raw", "bridge"],
+                default=None,
+                help=(
+                    "Override --megatron-to-hf-mode for the PRM teacher only. When unset, the "
+                    "teacher inherits the global --megatron-to-hf-mode. Setting this to a "
+                    "different value than the student is the supported way to mix modes "
+                    "(e.g. raw student + bridge teacher, or raw student of one size + raw "
+                    "teacher of a different size). In 'raw' mode the teacher's architectural "
+                    "fields (num_layers / hidden_size / ffn_hidden_size / num_query_groups / "
+                    "kv_channels / vocab / RoPE / etc.) are auto-populated from the teacher's "
+                    "torch_dist common.pt, so the teacher can be a different model size than "
+                    "the student's MODEL_ARGS (e.g. Qwen3-8B teacher with Qwen3-4B student). "
+                    "In 'bridge' mode the architecture is built from the teacher's HF config; "
+                    "use --prm-teacher-hf-checkpoint to point at the teacher's HF directory "
+                    "when --prm-teacher-load is a torch_dist directory."
+                ),
+            )
+            parser.add_argument(
+                "--prm-teacher-hf-checkpoint",
+                type=str,
+                default=None,
+                help=(
+                    "Override --hf-checkpoint for the PRM teacher only. Used for the teacher's "
+                    "tokenizer and HF-config lookup, and as the bridge source when "
+                    "--prm-teacher-megatron-to-hf-mode=bridge. Required for bridge teacher "
+                    "when --prm-teacher-load is a torch_dist (non-HF) directory. Defaults to "
+                    "the actor's --hf-checkpoint when unset."
+                ),
+            )
             reset_arg(parser, "--load", type=str, default=None)
             reset_arg(parser, "--save", type=str, default=None)
             reset_arg(parser, "--save-interval", type=int, default=None)
@@ -891,6 +933,19 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=0,
                 help="Number of top-K teacher logprobs for logits-based distillation loss. "
                 "Set to >0 (e.g. 50) to enable top-K distillation via custom_loss.",
+            )
+            parser.add_argument(
+                "--distill-subset-mode",
+                type=str,
+                choices=["student", "teacher", "overlap"],
+                default="student",
+                help=(
+                    "How the per-token subset Sₜ is selected for top-K OPD: "
+                    "'student' (default) = student top-K (extra teacher gather pass), "
+                    "'teacher' = teacher top-K (extra student-old gather pass), "
+                    "'overlap' = student top-K ∩ teacher top-K (no extra pass). "
+                    "Only consumed when --distill-topk > 0."
+                ),
             )
             parser.add_argument(
                 "--use-kl-loss", action="store_true", default=False, help="whether to use KL loss from GRPO"
@@ -1327,6 +1382,65 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="Number of independent PRM calls per step; the step score is the mean.",
             )
             parser.add_argument(
+                "--hint-m",
+                type=int,
+                default=None,
+                help=(
+                    "Number of PRM hint-generation rollouts per step. When unset "
+                    "(default), falls back to --prm-m. Only consumed by the "
+                    "retool-hybrid-select generate path (toolcall-rl/"
+                    "generate_with_retool_hybrid_select.py) and by terminal-rl's "
+                    "topk-select rollout (terminal-rl/topk_select_generate.py); "
+                    "ignored by the scalar-OPD / topk-OPD baselines."
+                ),
+            )
+            parser.add_argument(
+                "--topk-select-fallback-to-unenhanced",
+                action="store_true",
+                default=False,
+                help=(
+                    "Per-Sample fallback for terminal-rl's topk-select rollout: "
+                    "when no hint survives for a turn, ship a single degenerate "
+                    "teacher_tokens_candidate equal to the un-enhanced "
+                    "(prompt + response) so slime's K-loop has something to "
+                    "forward through (the OPD gradient is then ~0 on that "
+                    "Sample). When unset, that Sample carries no "
+                    "teacher_tokens_candidates and the loss kernel falls back "
+                    "to pure GRPO for it. No effect on any other rollout path."
+                ),
+            )
+            parser.add_argument(
+                "--topk-select-min-hint-chars",
+                type=int,
+                default=10,
+                help=(
+                    "Survival filter for the topk-select hint judge: hints "
+                    "shorter than this many trimmed characters are dropped. "
+                    "Mirrors the legacy retool-hybrid-select behaviour. Only "
+                    "consumed by terminal-rl/topk_select_generate.py."
+                ),
+            )
+            parser.add_argument(
+                "--hint-selection",
+                type=str,
+                choices=["shortest", "token_optimal", "sequence_optimal"],
+                default="shortest",
+                help=(
+                    "How to reduce per-step hint candidates and per-sample "
+                    "teacher-supervision candidates in the retool-hybrid-select "
+                    "loss path. 'shortest' (legacy): pick the shortest accepted "
+                    "hint per step, run a single teacher forward. "
+                    "'token_optimal': for every response token pick the teacher "
+                    "candidate whose top-K most overlaps the student's top-K. "
+                    "'sequence_optimal': pick a single teacher candidate per "
+                    "sample with maximal sum-over-positions overlap. The latter "
+                    "two require K teacher forwards on hint-enhanced prompts; "
+                    "they only make sense with --distill-subset-mode overlap "
+                    "(or teacher) since 'student' mode pre-aligns teacher "
+                    "indices to the student's so all candidates are degenerate."
+                ),
+            )
+            parser.add_argument(
                 "--prm-router-ip",
                 type=str,
                 default=None,
@@ -1397,6 +1511,17 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=2048,
                 help="Max new tokens for each PRM judge generation call.",
+            )
+            parser.add_argument(
+                "--prm-history-mode",
+                type=str,
+                default="head_tail",
+                choices=["last", "random", "head_tail"],
+                help=(
+                    "How the PRM judge selects prior turns when building its prompt: "
+                    "'last' = most recent k turns, 'random' = random sample of k turns, "
+                    "'head_tail' = first head_k + last tail_k turns."
+                ),
             )
             return parser
 
