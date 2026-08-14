@@ -1,35 +1,43 @@
 #!/bin/bash
 
+# Qwen3-0.6B single-GPU OpenClaw Combine (Binary RL + OPD) with INT4 QLoRA.
+# Same architecture as the 4B script: FSDP trainer + SGLang rollout colocated
+# on one GPU, with rollout offload between phases and an external PRM API.
+
 set -euo pipefail
 set -x
-# expandable_segments is incompatible with TorchMemorySaver used by
-# --offload-rollout; keep the colocate-safe allocator default.
+
+# NOTE: do NOT enable expandable_segments here. TorchMemorySaver (used by
+# --offload-rollout / colocate sleep-wakeup) is incompatible with it and the
+# SGLang engine will abort during load_model.
 export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-"max_split_size_mb:2048"}
 export SLIME_TRAINING_SAMPLES_FILE="../results/samples.jsonl"
 export PYTHONUNBUFFERED=1
-export SLIME_LOGIT_CHUNK_SIZE=512
+export SLIME_LOGIT_CHUNK_SIZE=${SLIME_LOGIT_CHUNK_SIZE:-512}
 export PYTHONFAULTHANDLER=1
-export OPENCLAW_GATEWAY_TOKEN=""
-export OPENAI_API_KEY=""
-export OPENCLAW_GATEWAY_URL=""
+export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+export OPENCLAW_GATEWAY_URL="${OPENCLAW_GATEWAY_URL:-}"
 export OPENCLAW_WORKSPACE="$HOME/.openclaw/workspace"
-export OPENAI_BASE_URL=""   # point to your external LLM
-export EXTERNAL_MODEL=""    # model name for the external LLM
-export SLIME_TRAIN_MAX_SEQ_LEN=4096 # truncation will happen if context + response exceed this length
+export OPENAI_BASE_URL="${OPENAI_BASE_URL:-}"   # point to your external LLM
+export EXTERNAL_MODEL="${EXTERNAL_MODEL:-}"    # model name for the external LLM
+export SLIME_TRAIN_MAX_SEQ_LEN=${SLIME_TRAIN_MAX_SEQ_LEN:-4096}
 export SGLANG_ENABLE_LOGITS_PROCESSER_CHUNK=True
-export SGLANG_LOGITS_PROCESSER_CHUNK_SIZE=128 # to avoid OOM with long context + response in INT4
+export SGLANG_LOGITS_PROCESSER_CHUNK_SIZE=${SGLANG_LOGITS_PROCESSER_CHUNK_SIZE:-128}
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-SLIME_ROOT="$(cd -- "${SCRIPT_DIR}/../slime" &>/dev/null && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." &>/dev/null && pwd)"
+SLIME_ROOT="${REPO_ROOT}/slime"
 
 NUM_GPUS=${NUM_GPUS:-1}
 ACTOR_GPUS=${ACTOR_GPUS:-1}
 ROLLOUT_GPUS=${ROLLOUT_GPUS:-1}
 
-# For bitsandbytes QLoRA, use the original HF checkpoint (do NOT use INT4 dir).
-HF_CKPT=${HF_CKPT:-to/models/Qwen3-4B}
+# Model weights live under <repo>/models/ by default.
+HF_CKPT=${HF_CKPT:-"${REPO_ROOT}/models/qwen3-0.6B"}
 REF_LOAD=${REF_LOAD:-${HF_CKPT}}
-SAVE_CKPT=${SAVE_CKPT:-/root/shared-nvme/OpenClaw-RL/models/qwen3_4b_openclaw_combine_single_gpu_int4_qlora_ckpt}
-PRM_MODEL_PATH=${PRM_MODEL_PATH:-${HF_CKPT}}
+SAVE_CKPT=${SAVE_CKPT:-"${REPO_ROOT}/export/ckpt/qwen3_0p6b_openclaw_combine_single_gpu_int4_qlora_ckpt"}
+
 # External PRM API (OpenAI-compatible)
 PRM_EXTERNAL_API_BASE=${PRM_EXTERNAL_API_BASE:-${OPENAI_BASE_URL:-}}
 PRM_EXTERNAL_MODEL=${PRM_EXTERNAL_MODEL:-${EXTERNAL_MODEL:-}}
@@ -40,12 +48,12 @@ if [[ -z "${PRM_EXTERNAL_API_BASE}" || -z "${PRM_EXTERNAL_MODEL}" ]]; then
   exit 1
 fi
 
-export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-4b-int4}"
+export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-0.6b-int4}"
 export HOST="0.0.0.0"
 export PORT="${PORT:-30000}"
 
 export OPENCLAW_RECORD_ENABLED="${OPENCLAW_RECORD_ENABLED:-1}"
-export OPENCLAW_RECORD_FILE="${SCRIPT_DIR}/results/qwen3_4b_single_gpu_int4_qlora_record.jsonl"
+export OPENCLAW_RECORD_FILE="${SCRIPT_DIR}/results/qwen3_0p6b_single_gpu_int4_qlora_record.jsonl"
 export OPENCLAW_EVAL_MODE="${OPENCLAW_EVAL_MODE:-1}"
 
 export OPENCLAW_COMBINE_W_RL="${OPENCLAW_COMBINE_W_RL:-1.0}"
@@ -76,7 +84,7 @@ ROLLOUT_ARGS=(
   --rollout-batch-size ${ROLLOUT_BATCH_SIZE:-16}
   --n-samples-per-prompt 1
   --rollout-max-response-len ${ROLLOUT_MAX_RESPONSE_LEN:-4096}
-  --rollout-max-context-len ${ROLLOUT_MAX_CONTEXT_LEN:-22768}
+  --rollout-max-context-len ${ROLLOUT_MAX_CONTEXT_LEN:-16384}
   --rollout-temperature ${ROLLOUT_TEMPERATURE:-0.6}
   --reward-key score
   --num-steps-per-rollout 1
@@ -86,7 +94,7 @@ COMBINE_ARGS=(
   --advantage-estimator grpo
   --disable-rewards-normalization
   --loss-type custom_loss
-  --custom-loss-function-path combine_loss.combine_loss_function   
+  --custom-loss-function-path combine_loss.combine_loss_function
   --use-kl-loss
   --kl-loss-coef 0.0
   --kl-loss-type low_var_kl
@@ -106,7 +114,7 @@ OPTIMIZER_ARGS=(
 
 PERF_ARGS=(
   --micro-batch-size ${MICRO_BATCH_SIZE:-1}
-  --max-tokens-per-gpu ${MAX_TOKENS_PER_GPU:-4096}
+  --max-tokens-per-gpu ${MAX_TOKENS_PER_GPU:-8192}
   --gradient-checkpointing
 )
 
@@ -125,7 +133,7 @@ QLORA_ARGS=(
 
 SGLANG_ARGS=(
   --rollout-num-gpus-per-engine 1
-  --sglang-context-length ${SGLANG_CONTEXT_LENGTH:-22768}
+  --sglang-context-length ${SGLANG_CONTEXT_LENGTH:-16384}
   --sglang-mem-fraction-static ${SGLANG_MEM_FRACTION_STATIC:-0.6}
   --sglang-reasoning-parser ${SGLANG_REASONING_PARSER:-qwen3}
   --sglang-tool-call-parser ${SGLANG_TOOL_CALL_PARSER:-qwen25}
@@ -156,7 +164,7 @@ if [[ "${USE_WANDB:-0}" == "1" && -n "${WANDB_API_KEY:-}" ]]; then
   WANDB_ARGS=(
     --use-wandb
     --wandb-project ${WANDB_PROJECT:-openclaw_rl_int4}
-    --wandb-group qwen3-4b-openclaw-combine-int4-qlora
+    --wandb-group qwen3-0p6b-openclaw-combine-int4-qlora
     --wandb-key ${WANDB_API_KEY}
   )
 fi
@@ -168,7 +176,8 @@ RUNTIME_ENV_JSON="{
     \"OPENCLAW_EVAL_MODE\": \"${OPENCLAW_EVAL_MODE}\",
     \"OPENCLAW_COMBINE_W_RL\": \"${OPENCLAW_COMBINE_W_RL}\",
     \"OPENCLAW_COMBINE_W_OPD\": \"${OPENCLAW_COMBINE_W_OPD}\",
-    \"TRAIN_EPOCHS\": \"${TRAIN_EPOCHS}\"
+    \"TRAIN_EPOCHS\": \"${TRAIN_EPOCHS}\",
+    \"PYTORCH_ALLOC_CONF\": \"${PYTORCH_ALLOC_CONF}\"
   }
 }"
 
