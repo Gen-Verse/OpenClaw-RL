@@ -6,9 +6,9 @@
 #   4. 健康检查（/v1/models 就绪才返回）
 #
 # 用法:
-#   bash up.sh            # 起 base 模型（默认）
-#   bash up.sh rl         # 起 RL ckpt（训练完成后评测用）
-#   bash up.sh down       # 停掉模型服务
+#   bash up.sh [base|rl] [0p6b|4b|8b]   # 起对应角色的模型服务
+#   bash up.sh down                      # 停掉模型服务
+#   bash up.sh base 4b                   # 例: Qwen3-4B-Instruct-2507
 #
 # 关键环境变量:
 #   WCB_ROOT     WildClawBench 克隆目录（检查镜像/数据用）
@@ -20,14 +20,23 @@ set -euo pipefail
 ABLATION_ROOT="${ABLATION_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)}"
 REPO_ROOT="$(cd -- "${ABLATION_ROOT}/.." &>/dev/null && pwd)"
 ROLE="${1:-base}"
+SIZE="${2:-0p6b}"
 PORT="${PORT:-8000}"
-BASE_CKPT="${BASE_CKPT:-${REPO_ROOT}/models/qwen3-0.6B}"
-RL_CKPT="${RL_CKPT:-${REPO_ROOT}/export/ckpt/wcb_grpo_qlora_ckpt}"
 LOG_DIR="${ABLATION_ROOT}/results/logs"
 PID_FILE="${LOG_DIR}/sglang.pid"
 
-BASE_MODEL="${BASE_MODEL:-qwen3-0p6b-base}"
-RL_MODEL="${RL_MODEL:-qwen3-0p6b-rl}"
+case "${SIZE}" in
+  0p6b) MODEL_DIR="qwen3-0.6B";               NAME="qwen3-0p6b" ;;
+  4b)   MODEL_DIR="Qwen3-4B-Instruct-2507";   NAME="qwen3-4b-instruct" ;;
+  8b)   MODEL_DIR="Qwen3-8B";                 NAME="qwen3-8b" ;;
+  *) echo "unknown size: ${SIZE} (0p6b|4b|8b)" >&2; exit 2 ;;
+esac
+
+BASE_CKPT="${BASE_CKPT:-${REPO_ROOT}/models/${MODEL_DIR}}"
+RL_CKPT="${RL_CKPT:-${REPO_ROOT}/export/ckpt/wcb_grpo_qlora_ckpt}"
+
+BASE_MODEL="${NAME}-base"
+RL_MODEL="${NAME}-rl"
 
 mkdir -p "${LOG_DIR}"
 
@@ -60,6 +69,8 @@ case "${ROLE}" in
   rl)   CKPT="${RL_CKPT}";  SERVED="${RL_MODEL}" ;;
   *) echo "unknown role: ${ROLE} (base|rl|down)" >&2; exit 2 ;;
 esac
+
+PID_FILE="${LOG_DIR}/sglang_${ROLE}_${SIZE}.pid"
 
 # ---------- preflight ----------
 log "preflight checks..."
@@ -104,11 +115,13 @@ nohup python3 -m sglang.launch_server \
   --host 0.0.0.0 \
   --port "${PORT}" \
   --mem-fraction-static "${MEM_FRACTION:-0.85}" \
-  > "${LOG_DIR}/sglang_${ROLE}.log" 2>&1 &
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen25 \
+  > "${LOG_DIR}/sglang_${ROLE}_${SIZE}.log" 2>&1 &
 echo $! > "${PID_FILE}"
 
 # ---------- health check ----------
-log "waiting for server ready (log: ${LOG_DIR}/sglang_${ROLE}.log) ..."
+log "waiting for server ready (log: ${LOG_DIR}/sglang_${ROLE}_${SIZE}.log) ..."
 for i in $(seq 1 "${WAIT_SECS:-600}"); do
   if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; then
     log "server ready at http://127.0.0.1:${PORT} (served-model-name=${SERVED})"
@@ -122,7 +135,7 @@ for i in $(seq 1 "${WAIT_SECS:-600}"); do
     exit 0
   fi
   if ! kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
-    echo "[up] ERROR: server died; see ${LOG_DIR}/sglang_${ROLE}.log" >&2
+    echo "[up] ERROR: server died; see ${LOG_DIR}/sglang_${ROLE}_${SIZE}.log" >&2
     exit 1
   fi
   sleep 2

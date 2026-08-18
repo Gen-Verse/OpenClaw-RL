@@ -12,6 +12,22 @@
         {
           "id": "qwen3-0p6b-rl",
           "name": "qwen3-0p6b-rl"
+        },
+        {
+          "id": "qwen3-4b-instruct-base",
+          "name": "qwen3-4b-instruct-base"
+        },
+        {
+          "id": "qwen3-4b-instruct-rl",
+          "name": "qwen3-4b-instruct-rl"
+        },
+        {
+          "id": "qwen3-8b-base",
+          "name": "qwen3-8b-base"
+        },
+        {
+          "id": "qwen3-8b-rl",
+          "name": "qwen3-8b-rl"
         }
       ]
     }

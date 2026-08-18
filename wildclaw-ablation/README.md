@@ -48,6 +48,32 @@ cp configs/my_api.template.json configs/my_api.json
 每个变体只改两样东西：endpoint 后面的模型名（base ckpt 或 RL ckpt 各起
 一个 served model name）、是否注入 skills。
 
+## 模型尺寸
+
+支持 0.6B / 4B / 8B 三档，下载（服务器上执行）：
+
+```bash
+# 0.6B（弱，只适合冒烟）
+hf download Qwen/Qwen3-0.6B --local-dir ~/Desktop/OpenClaw-RL/models/qwen3-0.6B
+# 4B（推荐起点）
+hf download Qwen/Qwen3-4B-Instruct-2507 --local-dir ~/Desktop/OpenClaw-RL/models/Qwen3-4B-Instruct-2507
+# 8B
+hf download Qwen/Qwen3-8B --local-dir ~/Desktop/OpenClaw-RL/models/Qwen3-8B
+# 国内可换 modelscope：modelscope download --model Qwen/Qwen3-8B --local_dir <同上>
+```
+
+按尺寸起服务（一次只起一个；换尺寸先 down 再起）：
+
+```bash
+bash scripts/up.sh base 0p6b   # qwen3-0p6b-base
+bash scripts/up.sh base 4b     # qwen3-4b-instruct-base
+bash scripts/up.sh base 8b     # qwen3-8b-base
+bash scripts/up.sh down        # 停止当前服务
+```
+
+评测时模型名跟着变，例如 8B：`--model local/qwen3-8b-base`
+（`run_variant.sh` 里用 `BASE_MODEL=qwen3-8b-base`）。
+
 ## Skill 注入方式
 
 用官方 `--lobster-workspace` 机制：`run_variant.sh` 会把
