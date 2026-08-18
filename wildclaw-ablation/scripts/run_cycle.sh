@@ -15,6 +15,16 @@ MODE="${MODE:-full}"        # full = 四组消融; skill_only = 只跑 skill 进
 
 cd "${WCB_ROOT}"
 
+echo "== [0/6] preflight: docker image =="
+DOCKER_IMAGE_NAME="${DOCKER_IMAGE:-wildclawbench-ubuntu:v1.3}"
+if ! docker image inspect "${DOCKER_IMAGE_NAME}" >/dev/null 2>&1; then
+  echo "[cycle] ERROR: image '${DOCKER_IMAGE_NAME}' not found locally." >&2
+  echo "  It is NOT on Docker Hub. Load it from the HF tarball first:" >&2
+  echo "    hf download internlm/WildClawBench Images/wildclawbench-ubuntu_v1.3.tar --repo-type dataset --local-dir ." >&2
+  echo "    docker load -i Images/wildclawbench-ubuntu_v1.3.tar" >&2
+  exit 1
+fi
+
 # skill-only 模式: 不训练, 只评 base / skill_only
 VARIANTS="base skill_only rl_only rl_skill"
 if [[ "${MODE}" == "skill_only" ]]; then
