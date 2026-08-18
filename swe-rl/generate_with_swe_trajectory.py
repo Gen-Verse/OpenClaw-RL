@@ -71,6 +71,8 @@ from slime.utils.types import Sample
 from swe_env_client import SweEnvClient
 from swe_utils import get_docker_image_name
 
+from skill_feedback import augment_instance_message, publish_swe_trajectory
+
 
 # =============================================================================
 # Globals & config
@@ -595,6 +597,9 @@ async def _run_agent_remote(
     instance_template = agent_config.get("instance_template", "{{task}}")
     from jinja2 import Template
     instance_message = Template(instance_template).render(task=instance["problem_statement"])
+    instance_message, retrieved_skills = augment_instance_message(
+        instance_message, instance["problem_statement"]
+    )
 
     wrapper = _get_wrapper_tokens(tokenizer)
     gen_prompt_tokens = wrapper["gen_prompt"]
@@ -810,6 +815,7 @@ async def _run_agent_remote(
         "exit_status": exit_status,
         "n_steps": n_steps,
         "error": error,
+        "retrieved_skills": retrieved_skills,
     }
 
 
@@ -890,6 +896,7 @@ def _build_trajectory_sample(
     sample.metadata["n_turns"] = sum(1 for m in messages if m.get("role") == "assistant")
     sample.metadata["n_steps"] = run_info.get("n_steps", 0)
     sample.metadata["patch_source"] = run_info.get("patch_source")
+    sample.metadata["retrieved_skills"] = run_info.get("retrieved_skills", [])
 
     return sample
 
@@ -1081,6 +1088,13 @@ async def _generate_impl_trajectory(args, sample: Sample, sampling_params: dict)
     error = run_info["error"]
 
     _save_rollout_artifacts(sample=sample, iid=iid, sampling_params=sampling_params, run_info=run_info)
+
+    await publish_swe_trajectory(
+        instance=instance,
+        data_source=data_source,
+        resolved=bool(reward),
+        run_info=run_info,
+    )
 
     if not messages:
         logger.warning(f"[SWE-T] [{iid}] Step 5/5: ABORTED — no messages (error={error})")

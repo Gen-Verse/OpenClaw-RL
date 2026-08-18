@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# 一键拉起 WildClawBench 消融所需的所有组件：
+#   1. 前置检查（Docker 镜像 / 任务数据 / sglang / 配置）
+#   2. 生成 configs/my_api.json（从环境变量渲染模板）
+#   3. 起 SGLang 模型服务（后台 + pidfile + 日志）
+#   4. 健康检查（/v1/models 就绪才返回）
+#
+# 用法:
+#   bash up.sh            # 起 base 模型（默认）
+#   bash up.sh rl         # 起 RL ckpt（训练完成后评测用）
+#   bash up.sh down       # 停掉模型服务
+#
+# 关键环境变量:
+#   WCB_ROOT     WildClawBench 克隆目录（检查镜像/数据用）
+#   BASE_CKPT    base 模型路径     (默认 <repo>/models/qwen3-0.6B)
+#   RL_CKPT      RL 模型路径       (默认 <repo>/export/ckpt/wcb_grpo_qlora_ckpt)
+#   PORT         服务端口          (默认 8000)
+set -euo pipefail
+
+ABLATION_ROOT="${ABLATION_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)}"
+REPO_ROOT="$(cd -- "${ABLATION_ROOT}/.." &>/dev/null && pwd)"
+ROLE="${1:-base}"
+PORT="${PORT:-8000}"
+BASE_CKPT="${BASE_CKPT:-${REPO_ROOT}/models/qwen3-0.6B}"
+RL_CKPT="${RL_CKPT:-${REPO_ROOT}/export/ckpt/wcb_grpo_qlora_ckpt}"
+LOG_DIR="${ABLATION_ROOT}/results/logs"
+PID_FILE="${LOG_DIR}/sglang.pid"
+
+BASE_MODEL="${BASE_MODEL:-qwen3-0p6b-base}"
+RL_MODEL="${RL_MODEL:-qwen3-0p6b-rl}"
+
+mkdir -p "${LOG_DIR}"
+
+log() { echo "[up] $*"; }
+
+stop_server() {
+  if [[ -f "${PID_FILE}" ]]; then
+    local pid
+    pid="$(cat "${PID_FILE}")"
+    if kill -0 "${pid}" 2>/dev/null; then
+      log "stopping sglang pid=${pid}"
+      kill "${pid}" || true
+      sleep 3
+      kill -9 "${pid}" 2>/dev/null || true
+    fi
+    rm -f "${PID_FILE}"
+  fi
+  pkill -f "sglang.launch_server" 2>/dev/null || true
+}
+
+if [[ "${ROLE}" == "down" ]]; then
+  stop_server
+  log "stopped."
+  exit 0
+fi
+
+# ---------- pick ckpt ----------
+case "${ROLE}" in
+  base) CKPT="${BASE_CKPT}"; SERVED="${BASE_MODEL}" ;;
+  rl)   CKPT="${RL_CKPT}";  SERVED="${RL_MODEL}" ;;
+  *) echo "unknown role: ${ROLE} (base|rl|down)" >&2; exit 2 ;;
+esac
+
+# ---------- preflight ----------
+log "preflight checks..."
+
+if [[ ! -d "${CKPT}" ]]; then
+  echo "[up] ERROR: model dir not found: ${CKPT}" >&2
+  echo "  base 模型放到 ${BASE_CKPT}，或 export BASE_CKPT=/path/to/model" >&2
+  exit 1
+fi
+
+if ! python3 -c "import sglang" 2>/dev/null; then
+  echo "[up] ERROR: sglang not installed in current python env" >&2
+  exit 1
+fi
+
+if [[ -n "${WCB_ROOT:-}" ]]; then
+  if ! docker image inspect wildclawbench-ubuntu:v1.3 >/dev/null 2>&1; then
+    echo "[up] WARN: wildclawbench-ubuntu:v1.3 image not loaded; run the image download/load steps first" >&2
+  fi
+  if [[ ! -d "${WCB_ROOT}/workspace" ]]; then
+    echo "[up] WARN: ${WCB_ROOT}/workspace missing; hf download internlm/WildClawBench workspace first" >&2
+  fi
+fi
+
+# ---------- render my_api.json ----------
+MODELS_CONFIG="${ABLATION_ROOT}/configs/my_api.json"
+if [[ ! -f "${MODELS_CONFIG}" ]]; then
+  log "rendering ${MODELS_CONFIG} from template"
+  sed -e "s#http://host.docker.internal:8000/v1#http://host.docker.internal:${PORT}/v1#" \
+      -e "s#\${LOCAL_API_KEY}#${LOCAL_API_KEY:-none}#" \
+      "${ABLATION_ROOT}/configs/my_api.template.json" > "${MODELS_CONFIG}"
+  log "wrote ${MODELS_CONFIG} (baseUrl=http://host.docker.internal:${PORT}/v1)"
+fi
+
+# ---------- (re)start server ----------
+stop_server
+
+log "starting sglang: model=${CKPT} served-name=${SERVED} port=${PORT}"
+nohup python3 -m sglang.launch_server \
+  --model-path "${CKPT}" \
+  --served-model-name "${SERVED}" \
+  --host 0.0.0.0 \
+  --port "${PORT}" \
+  --mem-fraction-static "${MEM_FRACTION:-0.85}" \
+  > "${LOG_DIR}/sglang_${ROLE}.log" 2>&1 &
+echo $! > "${PID_FILE}"
+
+# ---------- health check ----------
+log "waiting for server ready (log: ${LOG_DIR}/sglang_${ROLE}.log) ..."
+for i in $(seq 1 "${WAIT_SECS:-600}"); do
+  if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; then
+    log "server ready at http://127.0.0.1:${PORT} (served-model-name=${SERVED})"
+    echo
+    echo "next:"
+    echo "  export WCB_ROOT=${WCB_ROOT:-<wildclawbench clone>}"
+    echo "  export BASE_MODEL=${SERVED} ABLATION_ROOT=${ABLATION_ROOT}"
+    echo "  bash ${ABLATION_ROOT}/scripts/run_cycle.sh        # 完整闭环"
+    echo "  # 或只跑 skill 进化:"
+    echo "  bash ${ABLATION_ROOT}/scripts/run_tasks.sh train local/${SERVED} 0"
+    exit 0
+  fi
+  if ! kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
+    echo "[up] ERROR: server died; see ${LOG_DIR}/sglang_${ROLE}.log" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+echo "[up] ERROR: server not ready after ${WAIT_SECS:-600}s; see ${LOG_DIR}/sglang_${ROLE}.log" >&2
+exit 1

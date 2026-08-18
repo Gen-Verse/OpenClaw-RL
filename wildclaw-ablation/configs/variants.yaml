@@ -1,0 +1,26 @@
+# 变体定义：run_variant.sh 读取（同名环境变量优先）
+# checkpoint 用 served model name 标识，对应 my_api.json 里的 model id
+variants:
+  base:
+    model_env: BASE_MODEL
+    default_model: qwen3-0p6b-base
+    inject_skills: false
+  skill_only:
+    model_env: BASE_MODEL
+    default_model: qwen3-0p6b-base
+    inject_skills: true
+  rl_only:
+    model_env: RL_MODEL
+    default_model: qwen3-0p6b-rl
+    inject_skills: false
+  rl_skill:
+    model_env: RL_MODEL
+    default_model: qwen3-0p6b-rl
+    inject_skills: true
+
+# 评测子集（纯文本）；02/05 多模态不跑
+categories:
+  - 01_Productivity_Flow
+  - 03_Social_Interaction
+  - 04_Search_Retrieval
+  - 06_Safety_Alignment
