@@ -74,6 +74,40 @@ bash scripts/up.sh down        # 停止当前服务
 评测时模型名跟着变，例如 8B：`--model local/qwen3-8b-base`
 （`run_variant.sh` 里用 `BASE_MODEL=qwen3-8b-base`）。
 
+## 判分模型（grading judge）
+
+部分任务的判分用 LLM judge（容器内 `OPENROUTER_BASE_URL` + `JUDGE_MODEL`
+的 OpenAI 兼容调用），默认是 `openai/gpt-5.4` 走 OpenRouter。两种选择：
+
+- **外部 judge（推荐写报告）**：`.env` 里填真 `OPENROUTER_API_KEY`，
+  judge 保持官方默认——分数和官方榜单口径一致，消融相对差也最干净。
+- **自评（自包含、零 API 成本）**：把 judge 也指到本机服务：
+
+  ```bash
+  # ~/Desktop/WildClawBench/.env
+  OPENROUTER_BASE_URL=http://10.200.0.1:8000/v1   # 容器视角的网桥地址
+  OPENROUTER_API_KEY=dummy
+  JUDGE_MODEL=qwen3-8b-base                           # 与 up.sh 的 served name 一致
+  ```
+
+  权衡：0.6B/4B 当 judge 噪声很大，**判分不准**；而且 RL 变体如果
+  judge 和被评模型是同一个，会有自评偏差。只建议在没 OpenRouter key、
+  又需要跑通含 judge 任务时临时用，正式数字尽量用强外部 judge。
+  消融对比时四组必须用**同一个 judge**，否则组间不可比。
+
+## 评测与进化的尺寸参数
+
+`run_variant.sh` / `run_cycle.sh` 都认 `SIZE`（0p6b|4b|8b），和
+`up.sh` 的命名规则一致：
+
+```bash
+# 4B skill-only 闭环
+SIZE=4b MODE=skill_only bash scripts/run_cycle.sh
+
+# 8B 单变体评测
+SIZE=8b bash scripts/run_variant.sh base
+```
+
 ## Skill 注入方式
 
 用官方 `--lobster-workspace` 机制：`run_variant.sh` 会把

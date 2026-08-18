@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 跑一个消融变体：只在 held-out eval 切分上评测（不碰 train 切分）。
-# 用法: bash run_variant.sh <base|skill_only|rl_only|rl_skill> [task.md 冒烟]
+# 用法: SIZE=<0p6b|4b|8b> bash run_variant.sh <base|skill_only|rl_only|rl_skill> [task.md 冒烟]
 set -euo pipefail
 
 VARIANT="${1:-}"
@@ -11,12 +11,21 @@ fi
 
 ABLATION_ROOT="${ABLATION_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)}"
 
+# 尺寸 -> served model name（与 up.sh 对齐）
+SIZE="${SIZE:-0p6b}"
+case "${SIZE}" in
+  0p6b) SIZE_NAME="qwen3-0p6b" ;;
+  4b)   SIZE_NAME="qwen3-4b-instruct" ;;
+  8b)   SIZE_NAME="qwen3-8b" ;;
+  *) echo "unknown SIZE: ${SIZE} (0p6b|4b|8b)" >&2; exit 2 ;;
+esac
+
 INJECT_SKILLS=0
 case "${VARIANT}" in
-  base)       MODEL="${BASE_MODEL:-qwen3-0p6b-base}" ;;
-  skill_only) MODEL="${BASE_MODEL:-qwen3-0p6b-base}"; INJECT_SKILLS=1 ;;
-  rl_only)    MODEL="${RL_MODEL:-qwen3-0p6b-rl}" ;;
-  rl_skill)   MODEL="${RL_MODEL:-qwen3-0p6b-rl}"; INJECT_SKILLS=1 ;;
+  base)       MODEL="${BASE_MODEL:-${SIZE_NAME}-base}" ;;
+  skill_only) MODEL="${BASE_MODEL:-${SIZE_NAME}-base}"; INJECT_SKILLS=1 ;;
+  rl_only)    MODEL="${RL_MODEL:-${SIZE_NAME}-rl}" ;;
+  rl_skill)   MODEL="${RL_MODEL:-${SIZE_NAME}-rl}"; INJECT_SKILLS=1 ;;
   *) echo "unknown variant: ${VARIANT}" >&2; exit 2 ;;
 esac
 MODEL_ID="${MODEL_ID:-local/${MODEL}}"

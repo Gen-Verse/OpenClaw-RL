@@ -7,11 +7,13 @@ ABLATION_ROOT="${ABLATION_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &
 WCB_ROOT="${WCB_ROOT:?set WCB_ROOT to the WildClawBench clone}"
 REPO_ROOT="$(cd -- "${ABLATION_ROOT}/.." &>/dev/null && pwd)"
 
-BASE_MODEL="${BASE_MODEL:-qwen3-0p6b-base}"
-RL_MODEL="${RL_MODEL:-qwen3-0p6b-rl}"
+# 模型名不设默认：留空时由 run_variant.sh 按 SIZE 解析
+BASE_MODEL="${BASE_MODEL:-}"
+RL_MODEL="${RL_MODEL:-}"
 ROLLOUTS_PER_TASK="${ROLLOUTS_PER_TASK:-4}"
 DO_TRAIN="${DO_TRAIN:-0}"   # 1 = 跑离线 GRPO
 MODE="${MODE:-full}"        # full = 四组消融; skill_only = 只跑 skill 进化线
+SIZE="${SIZE:-0p6b}"         # 0p6b|4b|8b，传给 run_variant.sh
 
 cd "${WCB_ROOT}"
 
@@ -39,8 +41,15 @@ python3 "${ABLATION_ROOT}/scripts/make_split.py" \
   --output "${ABLATION_ROOT}/configs/split.json"
 
 echo "== [2/6] collect train-split trajectories (base model) =="
+case "${SIZE}" in
+  0p6b) SIZE_NAME="qwen3-0p6b" ;;
+  4b)   SIZE_NAME="qwen3-4b-instruct" ;;
+  8b)   SIZE_NAME="qwen3-8b" ;;
+  *) echo "unknown SIZE: ${SIZE} (0p6b|4b|8b)" >&2; exit 2 ;;
+esac
+COLLECT_MODEL="${BASE_MODEL:-${SIZE_NAME}-base}"
 RUN_NAME=collect_base ROLLOUTS_PER_TASK="${ROLLOUTS_PER_TASK}" \
-  bash "${ABLATION_ROOT}/scripts/run_tasks.sh" train "local/${BASE_MODEL}" 0
+  bash "${ABLATION_ROOT}/scripts/run_tasks.sh" train "local/${COLLECT_MODEL}" 0
 
 echo "== [3/6] skill evolution round =="
 python3 -m skill_evolve.run_round \
@@ -63,7 +72,7 @@ fi
 
 echo "== [5/6] evaluate 4 variants on held-out eval split =="
 for variant in ${VARIANTS}; do
-  BASE_MODEL="${BASE_MODEL}" RL_MODEL="${RL_MODEL}" \
+  SIZE="${SIZE}" BASE_MODEL="${BASE_MODEL}" RL_MODEL="${RL_MODEL}" \
     bash "${ABLATION_ROOT}/scripts/run_variant.sh" "${variant}"
 done
 
