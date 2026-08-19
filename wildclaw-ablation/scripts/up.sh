@@ -112,8 +112,9 @@ stop_server
 # 加了会把 content 吞进 reasoning_content、导致 openclaw 流式解析失败。
 REASONING_ARGS=()
 case "${SIZE}" in
-  0p6b|8b) REASONING_ARGS=(--reasoning-parser qwen3) ;;
+  0p6b) REASONING_ARGS=(--reasoning-parser qwen3) ;;
   4b)    REASONING_ARGS=() ;;
+  8b)    REASONING_ARGS=(--chat-template-kwargs '{"enable_thinking": false}') ;;
 esac
 
 log "starting sglang: model=${CKPT} served-name=${SERVED} port=${PORT}"
