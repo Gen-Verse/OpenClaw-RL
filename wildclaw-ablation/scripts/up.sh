@@ -114,7 +114,9 @@ REASONING_ARGS=()
 case "${SIZE}" in
   0p6b) REASONING_ARGS=(--reasoning-parser qwen3) ;;
   4b)    REASONING_ARGS=() ;;
-  8b)    REASONING_ARGS=(--chat-template-kwargs '{"enable_thinking": false}') ;;
+  # 8B thinking model: use a template that emits an empty think block so the
+  # answer goes to `content` (openclaw reads content; reasoning_content breaks it)
+  8b)    REASONING_ARGS=(--chat-template "${ABLATION_ROOT}/configs/qwen3_nothink_chat_template.jinja") ;;
 esac
 
 log "starting sglang: model=${CKPT} served-name=${SERVED} port=${PORT}"
