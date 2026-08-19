@@ -108,6 +108,14 @@ fi
 # ---------- (re)start server ----------
 stop_server
 
+# reasoning parser 只给 thinking 模型；Qwen3-4B-Instruct-2507 是非 thinking，
+# 加了会把 content 吞进 reasoning_content、导致 openclaw 流式解析失败。
+REASONING_ARGS=()
+case "${SIZE}" in
+  0p6b|8b) REASONING_ARGS=(--reasoning-parser qwen3) ;;
+  4b)    REASONING_ARGS=() ;;
+esac
+
 log "starting sglang: model=${CKPT} served-name=${SERVED} port=${PORT}"
 nohup python3 -m sglang.launch_server \
   --model-path "${CKPT}" \
@@ -115,7 +123,7 @@ nohup python3 -m sglang.launch_server \
   --host 0.0.0.0 \
   --port "${PORT}" \
   --mem-fraction-static "${MEM_FRACTION:-0.85}" \
-  --reasoning-parser qwen3 \
+  "${REASONING_ARGS[@]}" \
   --tool-call-parser qwen25 \
   > "${LOG_DIR}/sglang_${ROLE}_${SIZE}.log" 2>&1 &
 echo $! > "${PID_FILE}"
