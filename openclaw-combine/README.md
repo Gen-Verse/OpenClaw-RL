@@ -154,3 +154,53 @@ openclaw-combine/
 ├── combine_loss.py                           # Legacy combine loss
 └── results/                                  # Runtime records
 ```
+
+---
+
+## Single-GPU INT4 QLoRA
+
+Train and serve on a **single 24 GB GPU** using `run_qwen3_4b_openclaw_combine_single_gpu_int4_qlora.sh`.
+
+### Required Environment Variables
+
+| Variable | Description |
+|---|---|
+| `HF_CKPT` | Path to original Qwen3-4B HF weights (**not** pre-quantized) |
+| `OPENAI_API_KEY` | API key for external LLM (used by PRM and OPD teacher) |
+| `OPENAI_BASE_URL` | Base URL for the external LLM API |
+| `EXTERNAL_MODEL` | Model name served by the external API |
+
+### Optional Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MICRO_BATCH_SIZE` | `1` | Micro-batch size per GPU |
+| `ROLLOUT_BATCH_SIZE` | `16` | Samples collected before each training step |
+
+### Key Features Enabled
+
+| Feature | Flag / Config | Description |
+|---|---|---|
+| INT4 quantization | `--fsdp-load-in-4bit` | bitsandbytes NF4 quantization. Compresses base model weights to ~4 bits, reducing VRAM from ~8 GB (bf16) to ~2 GB for Qwen3-4B. Only LoRA adapters are trained in full precision. |
+| LoRA fine-tuning | `--use-lora --lora-rank 4` | Low-Rank Adaptation. Freezes base weights and inserts small trainable matrices into attention/MLP layers.
+| Gradient checkpointing | `--gradient-checkpointing` | Trades compute for memory by recomputing activations during backward pass instead of storing them. |
+| Colocate (train + rollout on same GPU) | `--colocate` | Runs both the FSDP training actor and the SGLang rollout engine on the same GPU(s). Essential for single-GPU setups. |
+| Rollout offload | `--offload-rollout` | When training starts, the SGLang rollout engine is offloaded from GPU to free VRAM for the training forward/backward pass. When training finishes, the engine is reloaded for the next rollout. This alternating pattern allows a single GPU to handle both roles. |
+| External PRM API | `--prm-use-external-api` | Sends PRM scoring requests to an external OpenAI-compatible API instead of hosting a local PRM model on GPU. Eliminates the need for a dedicated PRM GPU — critical for single-GPU setups. Configured via `PRM_EXTERNAL_API_BASE`, `PRM_EXTERNAL_MODEL`, and `PRM_EXTERNAL_API_KEY`. |
+| Train sequence truncation | `SLIME_TRAIN_MAX_SEQ_LEN=4096` | Caps the token length of each training sample. Sequences longer than this are truncated from the **left** (dropping early prompt tokens, preserving the response). Prevents OOM on long rollouts and keeps per-sample memory bounded. |
+| Logit chunking | `SLIME_LOGIT_CHUNK_SIZE=512` | Computes log-softmax and entropy in chunks of this size instead of materializing the full `[seq_len, vocab_size]` tensor at once. For Qwen3-4B (vocab ~152 K), this reduces peak allocation from ~7.5 GB to ~0.9 GB per sample. Set to `0` to disable chunking. |
+
+### Quick Start
+
+```bash
+cd slime
+
+export HF_CKPT="/path/to/Qwen3-4B"
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_BASE_URL="https://your-api-base"
+export EXTERNAL_MODEL="your-model-name"
+
+bash ../openclaw-combine/run_qwen3_4b_openclaw_combine_single_gpu_int4_qlora.sh
+```
+
+The model is served at `http://0.0.0.0:30000/v1` by default. For single-GPU evaluation scripts, see [`../openclaw-test/README.md`](../openclaw-test/README.md).

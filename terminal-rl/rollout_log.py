@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
+import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 import wandb
@@ -73,5 +76,11 @@ def rollout_log(rollout_id, args, samples, rollout_extra_metrics, rollout_time):
     log_dict["rollout/step"] = step
     _ensure_terminal_step_metric(args)
     logging_utils.log(args, log_dict, step_key="rollout/step")
+    metrics_path = os.getenv("TERMINAL_METRICS_PATH", "")
+    if metrics_path:
+        path = Path(metrics_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(log_dict, ensure_ascii=False) + "\n")
 
     return False

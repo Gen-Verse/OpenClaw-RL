@@ -282,6 +282,7 @@ class OpenClawOPDAPIServer:
         self._pending_records: dict[str, dict[str, Any]] = {}
 
         self._prm_enabled = getattr(args, "prm_enable", False)
+        self._prm_use_external_api = bool(getattr(args, "prm_use_external_api", False))
         self._prm_m = int(os.getenv("PRM_M", getattr(args, "prm_m", 3)))
         self._prm_temperature = float(getattr(args, "prm_temperature", 0.6))
         self._prm_max_tokens = int(getattr(args, "prm_max_new_tokens", 4096))
@@ -289,14 +290,33 @@ class OpenClawOPDAPIServer:
         self._teacher_lp_semaphore = asyncio.Semaphore(max(1, self._teacher_lp_max_concurrency))
         self.distill_topk = int(getattr(args, "distill_topk", 0))
         self._use_topk_distillation = self.distill_topk > 0
+        self._prm_external_api_base = (
+            getattr(args, "prm_external_api_base", None) or os.getenv("PRM_EXTERNAL_API_BASE", "")
+        ).rstrip("/")
+        self._prm_external_api_key = (
+            getattr(args, "prm_external_api_key", None) or os.getenv("PRM_EXTERNAL_API_KEY", "")
+        )
+        self._prm_external_model = getattr(args, "prm_external_model", None) or os.getenv("PRM_EXTERNAL_MODEL", "")
+        self._prm_external_chat_url = (
+            f"{self._prm_external_api_base}/chat/completions" if self._prm_external_api_base else ""
+        )
         prm_ip = getattr(args, "prm_router_ip", None)
         prm_port = getattr(args, "prm_router_port", None)
         self._prm_url = f"http://{prm_ip}:{prm_port}/generate" if prm_ip and prm_port else ""
+        self._teacher_logprob_url = self._prm_url or f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
         self._prm_tokenizer = None
         if self._prm_enabled:
-            prm_path = getattr(args, "prm_model_path", None) or args.hf_checkpoint
-            self._prm_tokenizer = load_tokenizer(prm_path, trust_remote_code=True)
-            logger.info("[OpenClaw-OPD] PRM enabled: url=%s m=%d", self._prm_url, self._prm_m)
+            if not self._prm_use_external_api:
+                prm_path = getattr(args, "prm_model_path", None) or args.hf_checkpoint
+                self._prm_tokenizer = load_tokenizer(prm_path, trust_remote_code=True)
+                logger.info("[OpenClaw-OPD] PRM enabled (local): url=%s m=%d", self._prm_url, self._prm_m)
+            else:
+                logger.info(
+                    "[OpenClaw-OPD] PRM enabled (external): chat_url=%s model=%s m=%d",
+                    self._prm_external_chat_url,
+                    self._prm_external_model,
+                    self._prm_m,
+                )
 
         self._record_file = os.getenv("OPENCLAW_RECORD_FILE", "") if os.getenv("OPENCLAW_RECORD_ENABLED", "0") == "1" else ""
         if self._record_file:
@@ -412,8 +432,44 @@ class OpenClawOPDAPIServer:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError as e:
             logger.warning("[OpenClaw-OPD] failed to write PRM record: %s", e)
+    async def _query_external_prm_chat_once(self, messages: list[dict[str, Any]], vote_id: int) -> str:
+        if not self._prm_external_chat_url:
+            return ""
 
-    async def _query_judge_once(self, judge_prompt: str, vote_id: int) -> dict[str, Any]:
+        payload = {
+            "model": self._prm_external_model,
+            "messages": messages,
+            "temperature": self._prm_temperature,
+            "max_tokens": self._prm_max_tokens,
+            "stream": False,
+        }
+        headers = {"Content-Type": "application/json"}
+        if self._prm_external_api_key:
+            headers["Authorization"] = f"Bearer {self._prm_external_api_key}"
+
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                resp = await client.post(self._prm_external_chat_url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+
+            choices = data.get("choices") if isinstance(data, dict) else None
+            if isinstance(choices, list) and choices:
+                message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+                return _flatten_message_content(message.get("content", ""))
+            return ""
+        except Exception as e:
+            logger.warning("[OpenClaw-OPD] external PRM chat query failed (vote %d): %s", vote_id, e)
+            return ""
+
+    async def _query_judge_once(self, judge_prompt: str | list[dict[str, Any]], vote_id: int) -> dict[str, Any]:
+        if self._prm_use_external_api:
+            if not isinstance(judge_prompt, list):
+                judge_prompt = [{"role": "user", "content": str(judge_prompt)}]
+            raw = await self._query_external_prm_chat_once(judge_prompt, vote_id)
+            score, hint = _parse_judge_result(raw)
+            return {"vote_id": vote_id, "score": score, "hint": hint, "raw": raw}
+  
         if not self._prm_url:
             return {"vote_id": vote_id, "score": None, "hint": "", "raw": ""}
         payload = {
@@ -445,6 +501,12 @@ class OpenClawOPDAPIServer:
             return {"vote_id": vote_id, "score": None, "hint": "", "raw": ""}
 
     async def _query_prm_eval_once(self, prompt_text: str, vote_id: int) -> int | None:
+        if self._prm_use_external_api:
+            if not isinstance(prompt_text, list):
+                prompt_text = [{"role": "user", "content": str(prompt_text)}]
+            raw = await self._query_external_prm_chat_once(prompt_text, vote_id)
+            return _parse_prm_eval_score(str(raw))
+        
         if not self._prm_url:
             return None
         payload = {
@@ -487,7 +549,7 @@ class OpenClawOPDAPIServer:
         }
         async with self._teacher_lp_semaphore:
             async with httpx.AsyncClient(timeout=None) as client:
-                resp = await client.post(self._prm_url, json=payload)
+                resp = await client.post(self._teacher_logprob_url, json=payload)
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -536,7 +598,7 @@ class OpenClawOPDAPIServer:
         }
         async with self._teacher_lp_semaphore:
             async with httpx.AsyncClient(timeout=None) as client:
-                resp = await client.post(self._prm_url, json=payload)
+                resp = await client.post(self._teacher_logprob_url, json=payload)
                 resp.raise_for_status()
                 result = resp.json()
 
@@ -587,7 +649,9 @@ class OpenClawOPDAPIServer:
         next_state_text = _flatten_message_content(next_state.get("content")) if next_state else ""
         next_state_role = next_state.get("role", "user") if next_state else "user"
         judge_msgs = _build_hint_judge_messages(turn_data["response_text"], next_state_text, next_state_role)
-        if self._prm_tokenizer:
+        if self._prm_use_external_api:
+            judge_prompt = judge_msgs
+        elif self._prm_tokenizer:
             judge_prompt = self._prm_tokenizer.apply_chat_template(judge_msgs, tokenize=False, add_generation_prompt=True)
         else:
             judge_prompt = "\n".join(m["content"] for m in judge_msgs)
@@ -596,7 +660,9 @@ class OpenClawOPDAPIServer:
 
         if self._eval_mode:
             eval_msgs = _build_prm_eval_prompt(turn_data["response_text"], next_state_text, next_state_role)
-            if self._prm_tokenizer:
+            if self._prm_use_external_api:
+                eval_prompt = eval_msgs
+            elif self._prm_tokenizer:
                 eval_prompt = self._prm_tokenizer.apply_chat_template(
                     eval_msgs, tokenize=False, add_generation_prompt=True,
                 )

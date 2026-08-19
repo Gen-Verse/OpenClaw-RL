@@ -117,6 +117,7 @@ Our long-term goal is to **advance personalized, practically useful agents with 
 ✅ **Release Track 1:** Fully async OpenClaw-RL framework with Binary RL + OPD  
 ✅ Best recipe discovery via demonstration experiments  
 ✅ Support LoRA Training  
+✅ Single-GPU INT4 QLoRA with offload-rollout and external PRM API (24 GB VRAM)  
 ✅ Deploy training on [Tinker](https://thinkingmachines.ai/tinker/)  
 ✅ Deploy training on [Fireworks AI](https://fireworks.ai)
 
@@ -237,6 +238,27 @@ If you're interested in any of these, feel free to open an issue to discuss your
 - **Framework:** [Slime](https://github.com/THUDM/slime) (our base RL framework)
 
 For detailed environment setup, see [Slime](https://github.com/THUDM/slime) or [`./instructions/README.md`](./instructions/README.md).
+
+#### Only have a single GPU (≥ 24 GB)?
+
+We support **single-GPU INT4 QLoRA** training and inference via:
+
+- **INT4 QLoRA** — bitsandbytes NF4 quantization + LoRA (rank=4), base weights ~2 GB VRAM
+- **Colocate + CPU Offload** — training and rollout share one GPU, offloading when idle
+- **External PRM API** — PRM scoring via any OpenAI-compatible API, no local PRM GPU needed
+
+```bash
+cd slime
+export HF_CKPT="/path/to/Qwen3-4B"           # original HF weights (not pre-quantized)
+export OPENAI_API_KEY="your-api-key"           # external LLM API key (for PRM & OPD)
+export OPENAI_BASE_URL="https://your-api-base"
+export EXTERNAL_MODEL="your-model-name"
+
+bash ../openclaw-combine/run_qwen3_4b_openclaw_combine_single_gpu_int4_qlora.sh
+```
+
+See [`./openclaw-combine/README.md`](./openclaw-combine/README.md) for full parameter reference and [`./openclaw-test/README.md`](./openclaw-test/README.md) for single-GPU evaluation scripts.
+
 
 <!--
 

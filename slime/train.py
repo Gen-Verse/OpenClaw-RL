@@ -17,7 +17,7 @@ def train(args):
     rollout_manager, num_rollout_per_epoch = create_rollout_manager(args, pgs["rollout"])
 
     # create the actor and critic models
-    actor_model, critic_model = create_training_models(args, pgs, rollout_manager)
+    actor_model, critic_model, prm_teacher_model= create_training_models(args, pgs, rollout_manager)
 
     if args.offload_rollout:
         ray.get(rollout_manager.onload_weights.remote())

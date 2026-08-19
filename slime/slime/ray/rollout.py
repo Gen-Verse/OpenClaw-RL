@@ -178,6 +178,7 @@ class RolloutManager:
 
     def offload(self):
         self.health_monitoring_pause()
+        ray.get([engine.pause_generation.remote() for engine in self.rollout_engines if engine is not None])
         return ray.get(
             [engine.release_memory_occupation.remote() for engine in self.rollout_engines if engine is not None]
         )
@@ -196,6 +197,7 @@ class RolloutManager:
 
     def onload_kv(self):
         self.onload(tags=[GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_CUDA_GRAPH])
+        ray.get([engine.continue_generation.remote() for engine in self.rollout_engines if engine is not None])
 
     def recover_rollout_engines(self):
         """Restart any dead rollout engines and update num_new_engines for update_weights detection."""

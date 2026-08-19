@@ -233,7 +233,65 @@ openclaw-test/
 ├── README.md              # This file
 ├── launch_user_llm.sh     # Script to host the external LLM via SGLang
 ├── student_chat.py        # Phase 1: Student asks agent to solve homework
+├── student_chat_single_gpu.py  # Single-GPU variant (SGLang offload-aware)
 ├── TA_chat.py             # Phase 2: TA asks agent to grade homework
 ├── teacher_chat.py        # Phase 3: Teacher asks agent to comment on strengths and weaknesses
+├── teacher_chat_single_gpu.py  # Single-GPU variant (SGLang offload-aware)
 └── GSM8K.json             # Dataset (to be placed here)
 ```
+
+---
+
+## Single-GPU INT4 QLoRA  Evaluation
+
+OpenClaw supports training and inference on a **single 24 GB GPU** using INT4 QLoRA (NF4 quantization + LoRA fine-tuning).
+
+### Requirements
+
+- 1× GPU with ≥ 24 GB VRAM (e.g. RTX 4090, A5000, L20)
+- Base model: Qwen3-4B or Qwen3-0.6B for quick start(original HF weights, **not** a pre-quantized checkpoint)
+
+### Training
+
+```bash
+cd slime
+
+export HF_CKPT="/path/to/Qwen3-4B"
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_BASE_URL="https://your-api-base"
+export EXTERNAL_MODEL="your-model-name"
+
+bash ../openclaw-combine/run_qwen3_4b_openclaw_combine_single_gpu_int4_qlora.sh
+```
+
+### Single-GPU Evaluation
+
+The `*_single_gpu.py` scripts check the local SGLang engine health before each request. If the engine is offloaded for training (weight updating), they automatically poll and retry until the engine is back online:
+
+```
+[SGLang] Engine not ready (weight updating/503). Polling every 60s...
+[SGLang] Waiting for weight update (503) | attempt 1/60
+[SGLang] Waiting for weight update (503) | attempt 2/60
+[SGLang] Waiting for weight update (503) | attempt 3/60
+...
+```
+
+This is expected behavior in single-GPU colocate mode — the rollout engine is temporarily unavailable while the training step runs. The script resumes automatically once training finishes and the engine reloads.
+
+```bash
+cd openclaw-test
+
+# Phase 1: Student Chat (run first)
+python student_chat_single_gpu.py \
+    --dataset GSM8K.json \
+    --num-problems 36 \
+    --max-turns 8
+
+# Phase 2: Teacher Chat (run after student)
+python teacher_chat_single_gpu.py \
+    --dataset GSM8K.json \
+    --num-problems 36 \
+    --max-turns 8
+```
+
+

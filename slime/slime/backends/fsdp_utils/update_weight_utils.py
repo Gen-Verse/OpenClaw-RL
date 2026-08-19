@@ -44,11 +44,11 @@ class UpdateWeight(abc.ABC):
     ) -> None:
         pass
 
-    def update_weights(self) -> None:
+    def update_weights(self, state_dict=None) -> None:
         self.weight_version += 1
         bucket = []
         bucket_size = 0
-        for name, param in self.model.state_dict().items():
+        for name, param in (state_dict or self.model.state_dict()).items():
             if self._name_transform is not None:
                 name = self._name_transform(name)
                 if name is None:
@@ -175,9 +175,9 @@ class UpdateWeightFromTensor(UpdateWeight):
                 ray.get(ref)
 
         if dist.get_rank() == self._ipc_gather_src:
-            ref = self._ipc_engine.flush_cache.remote()
-            ray.get(ref)
-
+            if not getattr(self.args, "offload_rollout", False):
+                ref = self._ipc_engine.flush_cache.remote()
+                ray.get(ref)
 
 class UpdateWeightFromDistributed(UpdateWeight):
     """Broadcast weights via a temporary NCCL group to rollout engines."""

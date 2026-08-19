@@ -1,0 +1,27 @@
+services:
+  openclaw_single_gpu_trainer:
+    image: ${OPENCLAW_RL_IMAGE:-openclaw-rl:latest}
+    working_dir: /workspace
+    command: >
+      bash openclaw-combine/run_qwen3_4b_openclaw_combine_qlora_single_gpu_int4.sh
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+      NUM_GPUS: "1"
+      ACTOR_GPUS: "1"
+      ROLLOUT_GPUS: "1"
+      MASTER_ADDR: "127.0.0.1"
+      MASTER_PORT: "29500"
+      HF_CKPT: ${HF_CKPT}
+      SAVE_CKPT: ${SAVE_CKPT:-/workspace/models/qwen3_4b_openclaw_combine_single_gpu_int4_qlora_ckpt}
+      PRM_EXTERNAL_API_BASE: ${PRM_EXTERNAL_API_BASE}
+      PRM_EXTERNAL_MODEL: ${PRM_EXTERNAL_MODEL}
+      PRM_EXTERNAL_API_KEY: ${PRM_EXTERNAL_API_KEY:-}
+    volumes:
+      - ../..:/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

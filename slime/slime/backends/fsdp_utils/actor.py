@@ -87,8 +87,7 @@ class FSDPTrainRayActor(TrainRayActor):
         with init_context():
             model = self.get_model_cls().from_pretrained(
                 self.args.hf_checkpoint,
-                trust_remote_code=True,
-                attn_implementation=self.args.attn_implementation,
+                **self._build_model_load_kwargs(),
             )
 
         model.train()
@@ -101,19 +100,24 @@ class FSDPTrainRayActor(TrainRayActor):
             model = apply_lora(model, self.args)
             model = propagate_no_split_modules(model)
 
-        full_state = model.state_dict()
+        if getattr(self.args, "fsdp_load_in_4bit", False) and dist.get_world_size() > 1:
+            raise NotImplementedError("fsdp_load_in_4bit currently supports single-rank training only.")
 
-        model = apply_fsdp2(model, mesh=self.dp_mesh, cpu_offload=self.fsdp_cpu_offload, args=self.args)
-
-        model = self._fsdp2_load_full_state_dict(
-            model, full_state, self.dp_mesh, cpu_offload=True if self.fsdp_cpu_offload else None
-        )
+        if getattr(self.args, "fsdp_load_in_4bit", False):
+            model = apply_fsdp2(model, mesh=self.dp_mesh, cpu_offload=self.fsdp_cpu_offload, args=self.args)
+        else:
+            full_state = model.state_dict()
+            model = apply_fsdp2(model, mesh=self.dp_mesh, cpu_offload=self.fsdp_cpu_offload, args=self.args)
+            model = self._fsdp2_load_full_state_dict(
+                model, full_state, self.dp_mesh, cpu_offload=True if self.fsdp_cpu_offload else None
+            )
 
         self.model = model
 
         if args.gradient_checkpointing:
             # LoRA freezes base params, so reentrant checkpointing fails
             # (inputs don't have requires_grad=True). Use non-reentrant mode.
+            self.model.config.use_cache = False
             gc_kwargs = {"use_reentrant": False} if self._is_lora else {}
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=gc_kwargs)
 
@@ -161,6 +165,9 @@ class FSDPTrainRayActor(TrainRayActor):
             def _lora_name_transform(name: str) -> str | None:
                 # Skip LoRA adapter parameters — SGLang only needs merged base weights
                 if "lora_A" in name or "lora_B" in name or "lora_embedding" in name:
+                    return None
+                # Skip bitsandbytes quantisation metadata (quant_state / absmax / …)
+                if "quant_state" in name or "bitsandbytes" in name:
                     return None
                 # Strip PEFT outer prefix: base_model.model.xxx → xxx
                 if name.startswith("base_model.model."):
@@ -243,11 +250,14 @@ class FSDPTrainRayActor(TrainRayActor):
         """
         from accelerate import init_empty_weights
 
-        # Check if model uses tied word embeddings (which doesn't work with meta tensors)
-        use_meta_tensor = not self.hf_config.tie_word_embeddings
-
         def cpu_init_weights():
             return torch.device("cpu")
+        
+        if getattr(self.args, "fsdp_load_in_4bit", False):
+            return cpu_init_weights
+
+        # Check if model uses tied word embeddings (which doesn't work with meta tensors)
+        use_meta_tensor = not self.hf_config.tie_word_embeddings
 
         if use_meta_tensor:
             # Rank 0: CPU, others: meta device (memory efficient for large models)
@@ -255,6 +265,55 @@ class FSDPTrainRayActor(TrainRayActor):
         else:
             logger.info(f"[Rank {dist.get_rank()}] tie_word_embeddings=True, loading full model to CPU on all ranks")
             return cpu_init_weights
+    
+    def _build_model_load_kwargs(self) -> dict:
+        kwargs = {
+            "trust_remote_code": True,
+            "attn_implementation": self.args.attn_implementation,
+        }
+
+        if getattr(self.args, "fsdp_load_in_4bit", False):
+            quant_cfg = getattr(self.hf_config, "quantization_config", None)
+            quant_method = None
+            if isinstance(quant_cfg, dict):
+                quant_method = quant_cfg.get("quant_method")
+            elif quant_cfg is not None:
+                quant_method = getattr(quant_cfg, "quant_method", None)
+
+            if str(quant_method).lower() == "compressed-tensors":
+                raise ValueError(
+                    "Detected quant_method=compressed-tensors in checkpoint config. "
+                    "For bitsandbytes QLoRA (--fsdp-load-in-4bit), please use the ORIGINAL HF checkpoint "
+                    "(e.g. Qwen3-4B-Thinking-2507), not a pre-converted INT4 directory."
+                )
+
+            from transformers import BitsAndBytesConfig
+
+            dtype_name = str(getattr(self.args, "fsdp_bnb_4bit_compute_dtype", "bfloat16")).lower()
+            compute_dtype_map = {
+                "bfloat16": torch.bfloat16,
+                "bf16": torch.bfloat16,
+                "float16": torch.float16,
+                "fp16": torch.float16,
+                "float32": torch.float32,
+                "fp32": torch.float32,
+            }
+            compute_dtype = compute_dtype_map.get(dtype_name)
+            if compute_dtype is None:
+                raise ValueError(
+                    f"Unsupported fsdp_bnb_4bit_compute_dtype={self.args.fsdp_bnb_4bit_compute_dtype}. "
+                    "Use bfloat16/float16/float32."
+                )
+
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type=getattr(self.args, "fsdp_bnb_4bit_quant_type", "nf4"),
+                bnb_4bit_compute_dtype=compute_dtype,
+                bnb_4bit_use_double_quant=bool(getattr(self.args, "fsdp_bnb_4bit_use_double_quant", True)),
+            )
+            kwargs["device_map"] = {"": torch.cuda.current_device()}
+
+        return kwargs
 
     def _fsdp2_load_full_state_dict(self, model, full_state, device_mesh, cpu_offload):
         """Load full state dict into FSDP2 model with efficient broadcast from rank 0.
@@ -408,6 +467,62 @@ class FSDPTrainRayActor(TrainRayActor):
             of packed batch dictionaries and `grad_accum` lists the micro-batch
             indices at which to perform optimizer steps.
         """
+        # ---- Optional: truncate each sample to keep the LAST max_seq_len tokens ----
+        # This drops the earliest prompt tokens, preserving the full response.
+        # Controlled by env var SLIME_TRAIN_MAX_SEQ_LEN (0 or unset = no truncation).
+        _max_seq_len = int(os.environ.get("SLIME_TRAIN_MAX_SEQ_LEN", "0"))
+        if _max_seq_len > 0:
+            for idx in range(len(rollout_data["tokens"])):
+                t = rollout_data["tokens"][idx]
+                if len(t) > _max_seq_len:
+                    trim = len(t) - _max_seq_len
+                    if dist.get_rank() == 0 and idx == 0:
+                        logger.info(
+                            f"SLIME_TRAIN_MAX_SEQ_LEN={_max_seq_len}: "
+                            f"sample {idx} truncated from {len(t)} to {_max_seq_len} tokens (dropped first {trim})"
+                        )
+                    rollout_data["tokens"][idx] = t[-_max_seq_len:]
+                    rollout_data["loss_masks"][idx] = rollout_data["loss_masks"][idx][-_max_seq_len:]
+
+                    # If truncation cut into the response (thinking models can have
+                    # very long responses), clamp response_lengths and trim all
+                    # response-only tensors to match.
+                    new_resp_len = int(sum(rollout_data["loss_masks"][idx]))
+                    # The first token of a sequence has no autoregressive
+                    # predecessor, so no valid log-prob exists for it.
+                    # Cap response_lengths at seq_len - 1 and zero out the
+                    # corresponding loss_mask bit.
+                    seq_len_after_trunc = len(rollout_data["tokens"][idx])
+                    if new_resp_len >= seq_len_after_trunc:
+                        new_resp_len = seq_len_after_trunc - 1
+                        # Zero the first set bit in loss_masks (the token we can't compute loss for)
+                        lm = rollout_data["loss_masks"][idx]
+                        if isinstance(lm, torch.Tensor):
+                            first_set = (lm != 0).nonzero(as_tuple=True)[0]
+                            if len(first_set) > 0:
+                                lm[first_set[0]] = 0
+                        else:
+                            for k in range(len(lm)):
+                                if lm[k] != 0:
+                                    lm[k] = 0
+                                    break
+                    old_resp_len = rollout_data["response_lengths"][idx]
+                    if new_resp_len < old_resp_len:
+                        rollout_data["response_lengths"][idx] = new_resp_len
+                        for resp_key in ["advantages", "returns"]:
+                            if resp_key in rollout_data and isinstance(rollout_data[resp_key][idx], torch.Tensor):
+                                rollout_data[resp_key][idx] = (
+                                    rollout_data[resp_key][idx][-new_resp_len:] if new_resp_len > 0
+                                    else rollout_data[resp_key][idx][:0]
+                                )
+
+                    if "rollout_log_probs" in rollout_data and rollout_data["rollout_log_probs"][idx] is not None:
+                        rlp = rollout_data["rollout_log_probs"][idx]
+                        if len(rlp) > new_resp_len:
+                            rollout_data["rollout_log_probs"][idx] = (
+                                rlp[-new_resp_len:] if new_resp_len > 0 else rlp[:0]
+                            )
+
         # Pack sequences efficiently
         tokens = rollout_data["tokens"]
 
@@ -562,6 +677,7 @@ class FSDPTrainRayActor(TrainRayActor):
                 )
 
         self.prof.step(rollout_id=rollout_id)
+        print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
         train_dump_utils.save_debug_train_data(self.args, rollout_id=rollout_id, rollout_data=rollout_data)
 
@@ -597,6 +713,8 @@ class FSDPTrainRayActor(TrainRayActor):
             temperature=self.args.rollout_temperature,
             compute_entropy=need_entropy,
         )
+        del logits
+        print_memory(f"计算log_probs和entropy之后")
         packed_batch["cur_log_probs"] = log_probs
         packed_batch["entropy"] = entropy_result
 
@@ -712,7 +830,10 @@ class FSDPTrainRayActor(TrainRayActor):
 
         # Scale loss for gradient accumulation
         loss = loss * self.dp_size / self.args.global_batch_size
+        print_memory(f"计算loss之后")
+        torch.cuda.empty_cache()
         loss.backward()
+        print_memory(f"反向传播之后")
 
         # Accumulate reported metrics (store tensors for later mean)
         for k, v in reported.items():
@@ -757,6 +878,42 @@ class FSDPTrainRayActor(TrainRayActor):
                 log_dict["train/step"] = self.global_step
                 logging_utils.log(self.args, log_dict, step_key="train/step")
             self.global_step += 1
+    
+    def _build_dequantized_state_dict(self) -> dict[str, torch.Tensor]:
+        """Return a state dict with bnb 4-bit weights dequantized to full shape.
+        """
+        try:
+            import bitsandbytes as bnb
+            import bitsandbytes.functional as bnb_F
+
+            bnb_cls = bnb.nn.Linear4bit
+        except ImportError:
+            return self.model.state_dict()
+
+        # Build a lookup: state-dict key -> Linear4bit module
+        bnb_weight_keys: dict[str, torch.nn.Module] = {}
+        for name, module in self.model.named_modules():
+            if isinstance(module, bnb_cls):
+                bnb_weight_keys[f"{name}.weight"] = module
+
+        if bnb_weight_keys:
+            logger.info("_build_dequantized_state_dict: found %d Linear4bit modules to dequantize", len(bnb_weight_keys))
+
+        state_dict: dict[str, torch.Tensor] = {}
+        for key, value in self.model.state_dict().items():
+            is_bnb_meta = any(key.startswith(wk + ".") for wk in bnb_weight_keys)
+            if is_bnb_meta:
+                continue
+            if key in bnb_weight_keys:
+                mod = bnb_weight_keys[key]
+                # Dequantize compressed uint8 → compute dtype (e.g. bf16)
+                w = bnb_F.dequantize_4bit(mod.weight.data, mod.weight.quant_state)
+                
+                state_dict[key] = w
+            else:
+                state_dict[key] = value
+
+        return state_dict
 
     @timer
     def update_weights(self) -> None:  # type: ignore[override]
@@ -782,7 +939,11 @@ class FSDPTrainRayActor(TrainRayActor):
         if self._is_lora:
             self.model.merge_adapter()
         try:
-            self.weight_updater.update_weights()
+            if getattr(self.args, "fsdp_load_in_4bit", False):
+                dequant_sd = self._build_dequantized_state_dict()
+                self.weight_updater.update_weights(state_dict=dequant_sd)
+            else:
+                self.weight_updater.update_weights()
         finally:
             if self._is_lora:
                 self.model.unmerge_adapter()
@@ -823,15 +984,17 @@ class FSDPTrainRayActor(TrainRayActor):
             with init_context():
                 ref_model = self.get_model_cls().from_pretrained(
                     ref_load_path,
-                    trust_remote_code=True,
-                    attn_implementation=self.args.attn_implementation,
+                    **self._build_model_load_kwargs(),
                 )
+            
+            if getattr(self.args, "fsdp_load_in_4bit", False):
+                ref_model = apply_fsdp2(ref_model, mesh=self.dp_mesh, cpu_offload=self.fsdp_cpu_offload, args=self.args)
+            else:
+                full_state = ref_model.state_dict()
 
-            full_state = ref_model.state_dict()
-
-            # Always use CPUOffloadPolicy for reference, let FSDP2 handle the offload. It is faster than model.cpu().
-            ref_model = apply_fsdp2(ref_model, mesh=self.dp_mesh, cpu_offload=True, args=self.args)
-            ref_model = self._fsdp2_load_full_state_dict(ref_model, full_state, self.dp_mesh, cpu_offload=True)
+                # Always use CPUOffloadPolicy for reference, let FSDP2 handle the offload. It is faster than model.cpu().
+                ref_model = apply_fsdp2(ref_model, mesh=self.dp_mesh, cpu_offload=True, args=self.args)
+                ref_model = self._fsdp2_load_full_state_dict(ref_model, full_state, self.dp_mesh, cpu_offload=True)
 
             logger.info(f"[Rank {dist.get_rank()}] Reference model created with FSDP2 CPUOffloadPolicy")
             return ref_model
@@ -839,8 +1002,9 @@ class FSDPTrainRayActor(TrainRayActor):
             raise NotImplementedError(f"Loading from checkpoint file {ref_load_path} not yet implemented")
 
     def _get_model_inputs_args(self, packed_sequence: dict) -> dict:
-        input_ids = packed_sequence["tokens"].unsqueeze(0)
-        position_ids = packed_sequence["position_ids"].unsqueeze(0)
+        device = torch.cuda.current_device()
+        input_ids = packed_sequence["tokens"].unsqueeze(0).to(device)
+        position_ids = packed_sequence["position_ids"].unsqueeze(0).to(device)
 
         model_args = {
             "input_ids": input_ids,
@@ -928,6 +1092,44 @@ def get_logprob_and_entropy(
         entropy: Entropy with shape [seq_len - 1]
     """
     shifted_logits = logits[:-1, :]
+    _chunk_size = int(os.environ.get("SLIME_LOGIT_CHUNK_SIZE", "1024"))
+    if _chunk_size > 0:
+        # Chunked path: avoids materialising a full [T-1, V] log-softmax tensor.
+        # Peak extra VRAM is O(chunk * V) instead of O(T * V).
+        # For Qwen3-4B (V≈152K, T≈4096) this cuts peak allocation from ~7.5 GB to ~0.9 GB.
+        T = shifted_logits.shape[0]
+        targets = target_tokens[1:].to(device=shifted_logits.device)
+        if temperature is not None:
+            temp_tensor = torch.tensor(temperature, dtype=shifted_logits.dtype, device=shifted_logits.device)
+
+        log_probs_chunks: list[torch.Tensor] = []
+        entropy_chunks: list[torch.Tensor] = []
+
+        for start in range(0, T, _chunk_size):
+            chunk = shifted_logits[start : start + _chunk_size].float()
+            if temperature is not None:
+                chunk = chunk / temp_tensor
+            log_p = torch.log_softmax(chunk, dim=-1)         # [chunk, V]
+            del chunk
+
+            chunk_targets = targets[start : start + _chunk_size]
+            lp = torch.gather(log_p, dim=-1, index=chunk_targets.unsqueeze(-1)).squeeze(-1)
+            log_probs_chunks.append(lp)
+
+            if compute_entropy:
+                p = log_p.exp()                               # [chunk, V]
+                ent = -(p * log_p).sum(dim=-1)               # [chunk]
+                entropy_chunks.append(ent)
+                del p
+            del log_p
+
+        log_probs = torch.cat(log_probs_chunks)
+        if compute_entropy:
+            entropy = torch.cat(entropy_chunks)
+        else:
+            entropy = torch.zeros_like(log_probs)
+        return log_probs, entropy
+    
     log_probs = gather_log_probs_packed(
         shifted_logits, target_tokens, allow_compile=allow_compile, temperature=temperature
     )
@@ -989,6 +1191,12 @@ def apply_fsdp2(model, mesh=None, cpu_offload=False, args=None):
     Ref: https://github.com/volcengine/verl/blob/main/verl/utils/fsdp_utils.py
     """
     from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy, fully_shard
+
+    if args is not None and getattr(args, "fsdp_load_in_4bit", False):
+        logger.warning(
+            "Skip FSDP fully_shard for fsdp_load_in_4bit to avoid bnb-4bit non-floating parameter conflict."
+        )
+        return model
 
     offload_policy = CPUOffloadPolicy() if cpu_offload else None
 

@@ -6,6 +6,8 @@ swe.pem
 __pycache__/
 *.pyc
 logs
+terminal-rl/outputs/
+terminal-rl/build_outputs/
 .DS_Store
 
 

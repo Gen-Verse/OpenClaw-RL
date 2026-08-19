@@ -55,6 +55,13 @@ class FSDPArgs:
     lora_target_modules: str | None = None  # comma-separated, e.g. "q_proj,v_proj"
     lora_modules_to_save: str | None = None  # modules kept fully trainable
 
+    # QLoRA / INT4
+    fsdp_load_in_4bit: bool = False
+    fsdp_bnb_4bit_quant_type: str = "nf4"  # nf4 / fp4
+    fsdp_bnb_4bit_compute_dtype: str = "bfloat16"  # bfloat16 / float16 / float32
+    fsdp_bnb_4bit_use_double_quant: bool = True
+    fsdp_prepare_model_for_kbit_training: bool = True
+    
     # Profile
     record_memory_history: bool = False
     memory_snapshot_path: str = "snapshot.pickle"

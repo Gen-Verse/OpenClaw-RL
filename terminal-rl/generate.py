@@ -13,6 +13,8 @@ from custom_types import RunContext, TaskTimeouts
 from env_client import create_env_client
 from agent_runner import AgentRunner
 from sample_builders import build_non_trainable_sample, build_samples_from_outcome
+from skill_context import augment_user_message
+from trajectory_sink import publish_terminal_trajectory
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,7 @@ async def generate(
     env_ready_for_evaluation = False
     outcome = None
     rollout_error: str | None = None
+    retrieved_skills: list[dict[str, Any]] = []
 
     try:
         task_name = task_meta["task_name"]
@@ -123,6 +126,10 @@ async def generate(
             env_ready_for_evaluation = True
 
             user_msg = reset_payload["user_msg"]
+            user_msg, retrieved_skills = augment_user_message(
+                user_msg,
+                task_meta["instruction"],
+            )
             tool_schemas = reset_payload["tool_schemas"]
             logger.info(
                 "%s Remote env reset complete. Starting terminal rollout.", log_tag
@@ -184,7 +191,9 @@ async def generate(
 
         stage = "sample.build"
         try:
-            return build_samples_from_outcome(
+            sample.metadata = sample.metadata or {}
+            sample.metadata["retrieved_skills"] = retrieved_skills
+            samples = build_samples_from_outcome(
                 sample,
                 outcome,
                 reward=reward,
@@ -194,6 +203,16 @@ async def generate(
                 prm_step_coef=prm_step_coef,
                 log_tag=log_tag,
             )
+            if not evaluation:
+                await publish_terminal_trajectory(
+                    task_meta=task_meta,
+                    reward=reward,
+                    outcome=outcome,
+                    rollout_error=rollout_error,
+                    eval_error=eval_error,
+                    retrieved_skills=retrieved_skills,
+                )
+            return samples
         except Exception as exc:
             _log_stage_exception(log_tag, stage, exc)
             return build_non_trainable_sample(

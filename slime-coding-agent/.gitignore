@@ -1,0 +1,4 @@
+outputs/
+.venv/
+skills/generated/
+skills/index.json

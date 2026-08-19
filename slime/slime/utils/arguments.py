@@ -1459,6 +1459,42 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 help="PRM model path for PRM engines; defaults to --hf-checkpoint when unset.",
             )
             parser.add_argument(
+                "--prm-use-external-api",
+                action="store_true",
+                default=False,
+                help=(
+                    "Use external OpenAI-compatible PRM API instead of framework-hosted PRM engines. "
+                    "When set, --prm-num-gpus can be 0."
+                ),
+            )
+            parser.add_argument(
+                "--prm-external-api-base",
+                type=str,
+                default=None,
+                help=(
+                    "Base URL for external OpenAI-compatible PRM API, e.g. https://api.example.com/v1. "
+                    "Can also be provided by PRM_EXTERNAL_API_BASE env var."
+                ),
+            )
+            parser.add_argument(
+                "--prm-external-api-key",
+                type=str,
+                default=None,
+                help=(
+                    "API key for external PRM API. "
+                    "Can also be provided by PRM_EXTERNAL_API_KEY env var."
+                ),
+            )
+            parser.add_argument(
+                "--prm-external-model",
+                type=str,
+                default=None,
+                help=(
+                    "Model name used on external PRM API. "
+                    "Can also be provided by PRM_EXTERNAL_MODEL env var."
+                ),
+            )
+            parser.add_argument(
                 "--prm-step-coef",
                 type=float,
                 default=1.0,
@@ -1871,14 +1907,31 @@ def slime_validate_args(args):
     if not args.prm_enable:
         args.prm_num_gpus = 0
     else:
-        assert args.prm_num_gpus > 0, "When --prm-enable is set, --prm-num-gpus must be > 0."
-        assert args.prm_num_gpus_per_engine > 0, "--prm-num-gpus-per-engine must be > 0."
-        assert args.prm_num_gpus % min(args.prm_num_gpus_per_engine, args.num_gpus_per_node) == 0, (
-            "prm_num_gpus must be divisible by min(prm_num_gpus_per_engine, num_gpus_per_node)."
-        )
-        if args.prm_model_path is None:
-            args.prm_model_path = args.hf_checkpoint
+        if args.prm_use_external_api:
+            if args.prm_external_api_base is None:
+                args.prm_external_api_base = os.getenv("PRM_EXTERNAL_API_BASE", None)
+            if args.prm_external_api_key is None:
+                args.prm_external_api_key = os.getenv("PRM_EXTERNAL_API_KEY", None)
+            if args.prm_external_model is None:
+                args.prm_external_model = os.getenv("PRM_EXTERNAL_MODEL", None)
 
+            assert args.prm_external_api_base, (
+                "When --prm-use-external-api is set, --prm-external-api-base or PRM_EXTERNAL_API_BASE is required."
+            )
+            assert args.prm_external_model, (
+                "When --prm-use-external-api is set, --prm-external-model or PRM_EXTERNAL_MODEL is required."
+            )
+            # External PRM API mode does not need local PRM engines.
+            args.prm_num_gpus = 0
+        else:
+            assert args.prm_num_gpus > 0, "When --prm-enable is set, --prm-num-gpus must be > 0."
+            assert args.prm_num_gpus_per_engine > 0, "--prm-num-gpus-per-engine must be > 0."
+            assert args.prm_num_gpus % min(args.prm_num_gpus_per_engine, args.num_gpus_per_node) == 0, (
+                "prm_num_gpus must be divisible by min(prm_num_gpus_per_engine, num_gpus_per_node)."
+            )
+            if args.prm_model_path is None:
+                args.prm_model_path = args.hf_checkpoint
+                
     if args.dump_details is not None:
         args.save_debug_rollout_data = f"{args.dump_details}/rollout_data/{{rollout_id}}.pt"
         args.save_debug_train_data = f"{args.dump_details}/train_data/{{rollout_id}}_{{rank}}.pt"

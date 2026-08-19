@@ -1,0 +1,35 @@
+{
+  "providers": {
+    "local": {
+      "baseUrl": "http://host.docker.internal:8000/v1",
+      "apiKey": "${LOCAL_API_KEY}",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "qwen3-0p6b-base",
+          "name": "qwen3-0p6b-base"
+        },
+        {
+          "id": "qwen3-0p6b-rl",
+          "name": "qwen3-0p6b-rl"
+        },
+        {
+          "id": "qwen3-4b-instruct-base",
+          "name": "qwen3-4b-instruct-base"
+        },
+        {
+          "id": "qwen3-4b-instruct-rl",
+          "name": "qwen3-4b-instruct-rl"
+        },
+        {
+          "id": "qwen3-8b-base",
+          "name": "qwen3-8b-base"
+        },
+        {
+          "id": "qwen3-8b-rl",
+          "name": "qwen3-8b-rl"
+        }
+      ]
+    }
+  }
+}

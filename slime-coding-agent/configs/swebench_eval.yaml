@@ -1,0 +1,14 @@
+benchmark:
+  name: swebench-lite
+  split: verified
+  max_instances: 20
+
+execution:
+  timeout_sec: 1800
+  parallel_workers: 4
+
+metrics:
+  - resolve_rate
+  - pass_at_1
+  - avg_cost_tokens
+  - avg_steps

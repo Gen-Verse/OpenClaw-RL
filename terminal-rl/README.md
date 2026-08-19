@@ -136,3 +136,59 @@ bash terminal-rl/terminal-rl_qwen3-8b_prm_2nodes.sh
 - `WORKER_URLS` must point to already-running pool servers.
 - The rollout agent implementation in `terminal-rl/agent/camel_agent.py` is based on [camel-ai/camel](https://github.com/camel-ai/camel)'s `ChatAgent`.
 
+---
+
+## Terminal self-evolution experiment
+
+The terminal-only experiment closes the loop from RL training to held-out evaluation and Skill reuse:
+
+```text
+training rollouts -> success/failure trajectories -> failure skill groups
+-> optional Skill retrieval -> held-out terminal evaluation
+```
+
+Prepare a deterministic train / held-out split before training:
+
+```bash
+python terminal-rl/data_utils/prepare_terminal_splits.py \
+  --tasks-dir terminal-rl/dataset/seta_env \
+  --dataset-dir terminal-rl/dataset \
+  --output-dir terminal-rl/dataset/seta_evolution_split \
+  --holdout-fraction 0.2 \
+  --seed terminal-evolution-v1
+```
+
+Set the following for an RL run:
+
+```bash
+export ROLLOUT_PROMPT_DATA="$PWD/terminal-rl/dataset/seta_evolution_split/train.jsonl"
+export EVAL_PROMPT_DATA="$PWD/terminal-rl/dataset/seta_evolution_split/heldout.jsonl"
+export TERMINAL_METRICS_PATH="$PWD/terminal-rl/outputs/metrics/rl_only.jsonl"
+export TERMINAL_EVAL_RESULTS_PATH="$PWD/terminal-rl/outputs/eval/rl_only.jsonl"
+export TERMINAL_TRAJECTORY_LOG="$PWD/terminal-rl/outputs/trajectories/rl_only.jsonl"
+export EVOLUTION_SERVER_URL="http://<evolution-server>:8010"
+```
+
+`rollout_log.py` writes `terminal/accuracy` against `rollout/step`; use
+`terminal_training_report.py` to export the curve. Held-out runs write task-level JSONL, and
+`terminal_report.py` reports `Pass@1`, `Pass@k`, resolve rate, average steps, and Skill retrieval rate.
+
+Run the four comparison variants with `scripts/run_terminal_variant.sh`:
+
+```text
+base       = base checkpoint, no Skill retrieval
+rl_only    = RL checkpoint, no Skill retrieval
+skill_only = base checkpoint, retrieved Skills
+rl_skill   = RL checkpoint, retrieved Skills
+```
+
+Skills are disabled by default. Enable them only for the `skill_only` and `rl_skill` variants:
+
+```bash
+export TERMINAL_SKILLS_DIR="$PWD/slime-coding-agent/skills/generated"
+export TERMINAL_SKILL_RETRIEVAL=1
+```
+
+The held-out evaluation never publishes trajectories to the evolution server, preventing test
+instances from becoming training data or Skills.
+

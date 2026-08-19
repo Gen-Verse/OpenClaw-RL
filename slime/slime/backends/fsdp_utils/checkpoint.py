@@ -135,13 +135,23 @@ def load(actor: Any) -> dict[str, Any] | None:
     # Load optimizer state (optional)
     load_optimizer = not getattr(actor.args, "no_load_optim", False) and hasattr(actor, "optimizer")
     if load_optimizer and optimizer_dir.exists():
-        optimizer_state = OptimizerState(actor.model, actor.optimizer)
-        optim_state_dict = {"optim_state": optimizer_state}
-        try:
-            dcp.load(state_dict=optim_state_dict, checkpoint_id=str(optimizer_dir))
-            logger.info(f"[FSDP] Loaded optimizer from {optimizer_dir}")
-        except Exception as e:
-            logger.warning(f"[FSDP] Failed to load optimizer from {optimizer_dir}: {e}")
+        raw_optim_file = optimizer_dir / "optimizer.pt"
+        if raw_optim_file.exists():
+            # Saved via torch.save (4-bit path)
+            try:
+                state = torch.load(raw_optim_file, map_location="cpu", weights_only=True)
+                actor.optimizer.load_state_dict(state)
+                logger.info(f"[FSDP] Loaded optimizer from {raw_optim_file}")
+            except Exception as e:
+                logger.warning(f"[FSDP] Failed to load optimizer from {raw_optim_file}: {e}")
+        else:
+            optimizer_state = OptimizerState(actor.model, actor.optimizer)
+            optim_state_dict = {"optim_state": optimizer_state}
+            try:
+                dcp.load(state_dict=optim_state_dict, checkpoint_id=str(optimizer_dir))
+                logger.info(f"[FSDP] Loaded optimizer from {optimizer_dir}")
+            except Exception as e:
+                logger.warning(f"[FSDP] Failed to load optimizer from {optimizer_dir}: {e}")
     elif load_optimizer:
         logger.info(f"[FSDP] Optimizer checkpoint not found at {optimizer_dir}, skipping optimizer load.")
 
@@ -236,9 +246,19 @@ def save(actor: Any, iteration: int) -> None:
     # Save optimizer state (skip if --no-save-optim is set)
     save_optimizer_state = not getattr(actor.args, "no_save_optim", False)
     if save_optimizer_state and hasattr(actor, "optimizer") and actor.optimizer is not None:
-        optimizer_state = OptimizerState(actor.model, actor.optimizer)
-        optim_state_dict = {"optim_state": optimizer_state}
-        dcp.save(optim_state_dict, checkpoint_id=str(optimizer_dir))
+        from .lora_utils import _has_4bit_params
+        if _has_4bit_params(actor.model):
+            # DCP's get_state_dict traverses the model for FQNs and chokes on
+            # Params4bit.  For 4-bit LoRA the optimizer only holds LoRA param
+            # states (base model is frozen), so plain torch.save is sufficient.
+            if dist.get_rank() == 0:
+                optimizer_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(actor.optimizer.state_dict(), optimizer_dir / "optimizer.pt")
+            dist.barrier()
+        else:
+            optimizer_state = OptimizerState(actor.model, actor.optimizer)
+            optim_state_dict = {"optim_state": optimizer_state}
+            dcp.save(optim_state_dict, checkpoint_id=str(optimizer_dir))
 
     # Save LR scheduler state (skip if --no-save-optim is set)
     if save_optimizer_state and hasattr(actor, "lr_scheduler") and actor.lr_scheduler is not None:

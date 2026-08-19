@@ -139,14 +139,10 @@ def unpack_sequences(packed_batch: dict) -> list[dict]:
 
     instances = []
 
-    # Calculate pad_length by counting trailing zeros
+    # Use cu_seqlens to compute padding length instead of counting trailing
+    # zero-valued tokens, because token id 0 can be a legitimate vocabulary entry.
     tokens = packed_batch["tokens"]
-    nonzero_indices = (tokens != 0).nonzero(as_tuple=True)[0]
-    if len(nonzero_indices) > 0:
-        # Last non-zero index, pad_length is everything after it
-        pad_length = len(tokens) - nonzero_indices[-1].item() - 1
-    else:
-        pad_length = 0  # No padding if no non-zero tokens (or all zeros)
+    pad_length = len(tokens) - cu_seqlens[-1].item()
     for i in range(num_sequences):
         start_idx = cu_seqlens[i].item()
         end_idx = cu_seqlens[i + 1].item()
