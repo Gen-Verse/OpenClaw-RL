@@ -16,6 +16,22 @@ from . import llm
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
+_DEBUG_DIR = ""
+
+
+def set_debug_dir(path: str) -> None:
+    global _DEBUG_DIR
+    _DEBUG_DIR = path
+
+
+def _dump_raw(name: str, raw: str | None) -> None:
+    if not _DEBUG_DIR:
+        return
+    from pathlib import Path
+    d = Path(_DEBUG_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.txt").write_text(raw or "<None>", encoding="utf-8")
+
 _SYSTEM = """You are a skill evolution engineer. You receive:
 - the current skill (if any) and its full change history
 - sessions that used it (or, for new-skill detection, sessions that used no skill)
@@ -116,7 +132,11 @@ def evolve_group(
         f"## History\n{history_text}\n\n"
         f"## Sessions\n{_format_evidence(sessions)}"
     )
-    result = _parse(llm.chat(_SYSTEM, user))
+    raw = llm.chat(_SYSTEM, user)
+    result = _parse(raw)
+    # 解析失败时把原始输出存下来，便于诊断
+    if result is None:
+        _dump_raw(f"evolve_{name}_raw", raw)
     if result is None or result["action"] == "skip":
         return None
     if not str(result.get("skill_md", "")).strip():

@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from skill_evolve import grouper, judge, sessions as session_mod
-from skill_evolve.evolver import evolve_group
+from skill_evolve.evolver import evolve_group, set_debug_dir
 from skill_evolve.store import EvolvingSkillStore
 from skill_evolve.verifier import verify
 
@@ -76,6 +76,8 @@ def main() -> None:
 
     report_path = Path(args.report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    # LLM 原始输出落盘，便于诊断解析失败
+    set_debug_dir(str(report_path.parent / "evolve_debug"))
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
