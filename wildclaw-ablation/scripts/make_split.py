@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 
 
 def split_tasks(tasks: list[Path], train_ratio: float, seed: str) -> tuple[list[str], list[str]]:
@@ -25,6 +26,16 @@ def split_tasks(tasks: list[Path], train_ratio: float, seed: str) -> tuple[list[
     train = [str(p) for p in ranked[:n_train]]
     eval_ = [str(p) for p in ranked[n_train:]]
     return train, eval_
+
+
+def task_modality(path: Path) -> str:
+    """Read the YAML frontmatter modality of a task markdown file."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[:3000]
+    except OSError:
+        return "unknown"
+    m = re.search(r"^modality:\s*(\S+)", text, re.M)
+    return m.group(1) if m else "unknown"
 
 
 def main() -> None:
@@ -55,6 +66,8 @@ def main() -> None:
         tasks = sorted(task_dir.glob("*.md")) if task_dir.is_dir() else []
         # exclude the annotated template
         tasks = [p for p in tasks if "template" not in p.name]
+        # pure-text only: multimodal tasks need vision models
+        tasks = [p for p in tasks if task_modality(p) == "pure-text"]
         train, eval_ = split_tasks(tasks, args.train_ratio, args.seed + cat)
         per_category[cat] = {"train": len(train), "eval": len(eval_)}
         train_all.extend(train)
