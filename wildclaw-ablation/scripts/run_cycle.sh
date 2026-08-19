@@ -38,6 +38,7 @@ fi
 echo "== [1/6] split =="
 python3 "${ABLATION_ROOT}/scripts/make_split.py" \
   --wcb-root "${WCB_ROOT}" \
+  ${WCB_CATEGORIES:+--categories ${WCB_CATEGORIES}} \
   --output "${ABLATION_ROOT}/configs/split.json"
 
 echo "== [2/6] collect train-split trajectories (base model) =="

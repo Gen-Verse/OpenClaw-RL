@@ -47,9 +47,9 @@ def main() -> None:
         default=[
             "01_Productivity_Flow",
             "03_Social_Interaction",
-            "04_Search_Retrieval",
             "06_Safety_Alignment",
         ],
+        help="默认排除 04_Search_Retrieval（需要 Brave API key）；要用就显式传入",
     )
     parser.add_argument("--train-ratio", type=float, default=0.65)
     parser.add_argument("--seed", default="wcb-ablation-v1")
