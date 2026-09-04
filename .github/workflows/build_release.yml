@@ -50,12 +50,43 @@ jobs:
           name: writing-style-app-artifacts
           path: build/
 
-      - name: Create or update GitHub Release assets (on release publish)
+  build_windows:
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install frontend deps (Windows)
+        run: |
+          npm install --no-audit --no-fund
+
+      - name: Build Windows installer (electron-builder)
+        run: |
+          npm run dist
+          New-Item -ItemType Directory -Path build -ErrorAction SilentlyContinue
+          $files = Get-ChildItem -Path dist -File -Recurse | ForEach-Object { $_.FullName }
+          if ($files) { Compress-Archive -Path $files -DestinationPath build\windows_artifacts.zip -Force }
+        shell: pwsh
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: writing-style-windows-artifact
+          path: build/windows_artifacts.zip
+
+      - name: Attach artifacts to Release (on publish)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: |
             build/backend_artifact.zip
             build/frontend_artifact.zip
+            build/windows_artifacts.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,9 +4,30 @@
   "description": "Electron app with Python backend that analyzes writing style and generates similar text",
   "main": "electron-main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64"
   },
   "author": "",
   "license": "MIT",
-  "dependencies": {}
+  "devDependencies": {
+    "electron": "^26.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "build": {
+    "appId": "com.genverse.writingstyle",
+    "files": [
+      "electron-main.js",
+      "renderer_index.html",
+      "renderer.js",
+      "style.css",
+      "package.json",
+      "backend_app.py",
+      "style_analyzer.py",
+      "backend_requirements.txt",
+      ".env.example"
+    ],
+    "win": {
+      "target": ["nsis"]
+    }
+  }
 }
