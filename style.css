@@ -1,0 +1,8 @@
+.container{max-width:900px;margin:28px auto;font-family:Inter,Segoe UI,Arial,sans-serif;color:#111}
+h1{font-weight:600;margin-bottom:12px}
+.controls{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+button{background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+.status{margin:8px 0;color:#555}
+.result{background:#f7f7f8;padding:12px;border-radius:8px;max-height:260px;overflow:auto}
+.sample{background:#fff7ed;padding:12px;border-radius:8px;margin-top:8px}

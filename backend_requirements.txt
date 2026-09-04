@@ -1,0 +1,3 @@
+Flask
+openai
+# Optional: add more NLP libs later (spaCy, transformers)
