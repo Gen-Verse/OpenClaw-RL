@@ -59,8 +59,9 @@ def generate_sample(analysis, sentences=3):
                 f"常见短语：{', '.join(analysis.get('top_bigrams', [])[:10])}\n"
                 "要求：使用流畅自然的中文，语气简洁优雅，每句长度与给定平均句长相近，不要包含源文件具体句子或版权内容。只返回纯文本段落。"
             )
+            model_name = os.getenv('OPENAI_MODEL', 'gpt-4')
             resp = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+                model=model_name,
                 messages=[
                     {"role": "system", "content": "你是一个中文写作助手，擅长模仿风格。"},
                     {"role": "user", "content": prompt}
