@@ -1,0 +1,92 @@
+name: Build and Publish Artifacts
+
+on:
+  push:
+    branches: [ main, treat125-writing-style-app ]
+  workflow_dispatch: {}
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend_requirements.txt ]; then pip install -r backend_requirements.txt; fi
+
+      - name: Package backend
+        run: |
+          mkdir -p build
+          zip -r build/backend_artifact.zip backend_app.py style_analyzer.py backend_requirements.txt .env.example || true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install frontend deps
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm i --no-audit --no-fund; fi
+        env:
+          CI: true
+
+      - name: Package frontend
+        run: |
+          zip -r build/frontend_artifact.zip electron-main.js renderer_index.html renderer.js style.css package.json || true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: writing-style-app-artifacts
+          path: build/
+
+  build_windows:
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install frontend deps (Windows)
+        run: |
+          npm install --no-audit --no-fund
+
+      - name: Build Windows installer (electron-builder)
+        run: |
+          npm run dist
+          New-Item -ItemType Directory -Path build -ErrorAction SilentlyContinue
+          $files = Get-ChildItem -Path dist -File -Recurse | ForEach-Object { $_.FullName }
+          if ($files) { Compress-Archive -Path $files -DestinationPath build\windows_artifacts.zip -Force }
+        shell: pwsh
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: writing-style-windows-artifact
+          path: build/windows_artifacts.zip
+
+      - name: Attach artifacts to Release (on publish)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            build/backend_artifact.zip
+            build/frontend_artifact.zip
+            build/windows_artifacts.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

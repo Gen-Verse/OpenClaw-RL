@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>写作风格器</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>写作风格器（Electron）</h1>
+      <div class="controls">
+        <button id="choose">选择文件夹</button>
+        <span id="dir"></span>
+        <button id="analyze" disabled>分析并生成示例</button>
+      </div>
+
+      <div id="status" class="status">状态：等待操作</div>
+
+      <h2>分析结果</h2>
+      <pre id="result" class="result">（分析结果将显示在此）</pre>
+
+      <h2>生成示例</h2>
+      <div id="sample" class="sample">（生成文本）</div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
