@@ -3,15 +3,44 @@ import re
 from collections import Counter
 
 def read_texts(directory):
+    """Read text from common document types including .txt, .md, .docx, and .xlsx.
+    Returns a list of file text contents.
+    """
     texts = []
     for root, dirs, files in os.walk(directory):
         for fname in files:
-            if fname.lower().endswith(('.txt', '.md', '.markdown', '.rst', '.tex')):
-                try:
-                    with open(os.path.join(root, fname), 'r', encoding='utf-8', errors='ignore') as fh:
+            path = os.path.join(root, fname)
+            lname = fname.lower()
+            try:
+                if lname.endswith(('.txt', '.md', '.markdown', '.rst', '.tex')):
+                    with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
                         texts.append(fh.read())
-                except Exception:
-                    continue
+                elif lname.endswith('.docx'):
+                    try:
+                        from docx import Document
+                        doc = Document(path)
+                        para_text = '\n'.join(p.text for p in doc.paragraphs if p.text)
+                        if para_text:
+                            texts.append(para_text)
+                    except Exception:
+                        continue
+                elif lname.endswith(('.xls', '.xlsx')):
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                        rows = []
+                        for ws in wb.worksheets:
+                            for row in ws.iter_rows(values_only=True):
+                                for cell in row:
+                                    if cell is not None:
+                                        rows.append(str(cell))
+                        if rows:
+                            texts.append('\n'.join(rows))
+                    except Exception:
+                        continue
+            except Exception:
+                # ignore unreadable files
+                continue
     return texts
 
 def analyze_directory(directory):
