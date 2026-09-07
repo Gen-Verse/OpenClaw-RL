@@ -1,3 +1,5 @@
 Flask
 openai
+python-docx
+openpyxl
 # Optional: add more NLP libs later (spaCy, transformers)
