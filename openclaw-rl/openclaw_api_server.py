@@ -31,16 +31,31 @@ _NON_STANDARD_BODY_KEYS = {"session_id", "session_done", "turn_type"}
 
 
 def _flatten_message_content(content):
-    """Extract plain text from multimodal content lists."""
+    """Serialize every content part so media is not silently discarded."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         parts = []
         for item in content:
-            if isinstance(item, dict):
-                if item.get("type") == "text":
-                    parts.append(item.get("text", ""))
-        return " ".join(parts) if parts else ""
+            if not isinstance(item, dict):
+                parts.append(str(item))
+                continue
+            part_type = item.get("type", "")
+            if part_type == "text":
+                value = item.get("text", "")
+                if value:
+                    parts.append(str(value))
+                continue
+            value = item.get(part_type)
+            if isinstance(value, dict):
+                value = value.get("url") or value.get("id") or value.get("data")
+            if value is None:
+                value = item.get("url") or item.get("data")
+            if value is not None:
+                parts.append(f"<{part_type}>{value}")
+            else:
+                parts.append(f"<{part_type}>")
+        return " ".join(parts)
     return str(content) if content is not None else ""
 
 
